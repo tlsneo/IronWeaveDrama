@@ -1,6 +1,6 @@
 # IronWeaveDrama
 
-独立的 AI 短剧制作系统，采用单体 Web 应用，不依赖 LocalMiniDrama。
+AI 短剧制作系统。
 
 ## 当前进度
 
