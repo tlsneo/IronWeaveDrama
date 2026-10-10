@@ -36,7 +36,7 @@ test('版本 1 升级为已有项目补第一季，重复启动不会重复补�
     database.close();
     database = openDatabase(filename);
     assert.equal(database.prepare('SELECT count(*) AS count FROM seasons').get().count, 1);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 10);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 11);
   } finally {
     database?.close();
     await rm(directory, { recursive: true, force: true });

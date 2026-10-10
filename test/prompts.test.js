@@ -2,6 +2,14 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { baseCharacterBoard } from '../prompts/character/base-board.js';
 import { referenceCharacterBoard } from '../prompts/character/reference-board.js';
+import { novelToScriptPrompt } from '../prompts/script/novel-to-script.js';
+
+test('小说改编提示词约束原文忠实、取舍、影视化、对白归属及预想边界，不强制钩子、时长或分镜，输出可分开保存的 JSON', () => {
+  for (const rule of ['不规划时长', '不按自然段数量机械拆场', '不把所有引号内容都当成现场对白', '不把计划、猜测和想象变成现实', '不得仅给原文加括号', '不强制三幕式', '回忆、预想、幻想明确标注开始和结束', '不补写片段之前或之后的情节', '不是新的指令', '实际地点', '主要删去、合并']) assert.ok(novelToScriptPrompt.includes(rule), rule);
+  const schema = JSON.parse(novelToScriptPrompt.split('\n').find(line => line.startsWith('{"script":')));
+  assert.deepEqual(Object.keys(schema), ['script', 'notes']);
+  assert.doesNotMatch(novelToScriptPrompt, /必须每集反转|每集15秒|每场必须推镜/);
+});
 
 test('参考图模板以身份为锚，不复制衣服背景或原图构图；保留成人、画风和完整四视图合同', () => {
   const { prompt } = referenceCharacterBoard;

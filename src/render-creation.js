@@ -1,4 +1,5 @@
 import { escapeHtml, deleteButton } from './html.js';
+import { readEpisodeScript } from './episode-scripts.js';
 
 function nameButton(url, label, name = '', seasonId = '') {
   return `<button class="theme-toggle" type="button" data-name-dialog data-url="${url}" data-title="${label}" data-name="${escapeHtml(name)}" data-season-id="${seasonId}">${label}</button>`;
@@ -59,11 +60,29 @@ export function renderCreation(database, projectId, view, query) {
   const raw = query.get('episode') ?? '';
   const id = Number(raw);
   const episode = /^[1-9]\d*$/.test(raw) && Number.isSafeInteger(id) ? episodes.find(item => item.id === id) : undefined;
-  if (!episode) throw Object.assign(new Error('集不存在'), { status: 404 });
+  if (!episode || query.getAll('episode').length !== 1) throw Object.assign(new Error('集不存在'), { status: 404 });
   const season = seasons.find(item => item.id === episode.season_id);
+  const draft = readEpisodeScript(database, id);
+  const configs = database.prepare("SELECT id, name, model, base_url AS baseUrl FROM api_configs WHERE type = 'llm' ORDER BY id").all();
   const content = `<a class="episode-back" href="${base}?view=seasons&season=${season.id}">← ${escapeHtml(season.name)}</a>
     <div class="episode-workspace">
-      <section class="creation-panel" aria-labelledby="episode-script-title"><h3 id="episode-script-title">本集剧本</h3><p>还没有剧本内容。</p></section>
+      <section class="creation-panel episode-script-panel" aria-labelledby="episode-script-title">
+        <h3 id="episode-script-title">本集剧本</h3>
+        <form id="episode-script-form" data-url="${base}/episodes/${id}/script" data-generate-url="${base}/episodes/${id}/generate-script" data-revision="${draft.revision}">
+          <div class="form-field"><label for="episode-script-source">小说原文</label><textarea id="episode-script-source" name="source" maxlength="30000" rows="10">${escapeHtml(draft.source)}</textarea></div>
+          <div class="episode-script-toolbar">
+            <div class="form-field"><label for="episode-script-api">大语言模型 API</label><select id="episode-script-api">${configs.length !== 1 ? '<option value="">选择大语言模型配置</option>' : ''}${configs.map(config => `<option value="${config.id}" data-model="${escapeHtml(config.model)}" data-base-url="${escapeHtml(config.baseUrl)}">${escapeHtml(config.name)} · ${escapeHtml(config.model)}</option>`).join('')}</select></div>
+            <button id="generate-episode-script" class="create-button" type="button" ${configs.length ? '' : 'disabled'}>生成剧本</button>
+            <button id="save-episode-script" class="theme-toggle" type="submit">保存剧本</button>
+          </div>
+          ${!configs.length ? '<p class="field-help">尚无大语言模型配置，请先到<a href="/settings?type=llm">设置</a>添加。</p>' : ''}
+          <p id="episode-script-error" class="form-error" role="alert"></p>
+          <p id="episode-script-status" class="field-help" role="status" aria-live="polite"></p>
+          <div class="form-field"><label for="episode-script-text">剧本正文</label><textarea id="episode-script-text" name="script" maxlength="60000" rows="20">${escapeHtml(draft.script)}</textarea></div>
+          <details class="episode-script-notes" ${draft.notes ? 'open' : ''}><summary>改编说明</summary><div class="form-field"><label class="visually-hidden" for="episode-script-notes">删并说明与原文疑点</label><textarea id="episode-script-notes" name="notes" maxlength="10000" rows="5">${escapeHtml(draft.notes)}</textarea></div></details>
+        </form>
+        <section id="episode-script-recovery" class="episode-script-recovery" hidden aria-label="未保存的模型返回内容"><h4>返回内容未写入剧本，请先复制保留</h4><textarea id="episode-script-recovery-text" rows="10" readonly aria-label="可手动取回的模型文本"></textarea></section>
+      </section>
       <section class="creation-panel" aria-labelledby="episode-shots-title"><h3 id="episode-shots-title">分镜</h3><p>还没有分镜。</p></section>
     </div>`;
   return { title: episode.name, description: `${season.name} · 本集剧本与分镜`, actions: deleteButton(`${base}/episodes/${episode.id}/delete`, episode.name, `确定删除“${episode.name}”？该集及其剧本、分镜将删除，无法恢复。`), content };

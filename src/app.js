@@ -10,6 +10,7 @@ import { saveApiConfig, checkApiConfig } from './settings.js';
 import { renderSettings } from './render-settings.js';
 import { generateCharacterBoard, clearCharacterBoard, saveCharacterReference, clearCharacterReference } from './character-images.js';
 import { deleteItem } from './deletion.js';
+import { saveEpisodeScript, generateEpisodeScript } from './episode-scripts.js';
 
 const resourceTypes = new Map([
   ['characters', { name: '角色', description: '管理这部短剧的基础角色与参考图' }],
@@ -29,6 +30,7 @@ for (const [path, type] of [
   ['/image-editor.js', 'text/javascript'],
   ['/image-mask.js', 'text/javascript'],
   ['/character-reference.js', 'text/javascript'],
+  ['/episode-script.js', 'text/javascript'],
 ]) {
   assets.set(path, { type, file: new URL(`../public${path}`, import.meta.url) });
 }
@@ -93,6 +95,7 @@ export function createApp(database) {
     const deleteProjectRoute = path.match(/^\/projects\/([1-9]\d*)(?:\/(characters|seasons|episodes)\/([1-9]\d*))?\/delete$/);
     const deleteConfigRoute = path.match(/^\/settings\/api\/([1-9]\d*)\/delete$/);
     const creationRoute = path.match(/^\/projects\/([1-9]\d*)\/(seasons|episodes)(?:\/([1-9]\d*)(\/move)?)?$/);
+    const scriptRoute = path.match(/^\/projects\/([1-9]\d*)\/episodes\/([1-9]\d*)\/(script|generate-script)$/);
     const characterRoute = path.match(/^\/projects\/([1-9]\d*)\/characters(?:\/([1-9]\d*))?$/);
     const generationRoute = path.match(/^\/projects\/([1-9]\d*)\/characters\/([1-9]\d*)\/(generate|edit-image|clear-image)$/);
     const referenceRoute = path.match(/^\/projects\/([1-9]\d*)\/characters\/([1-9]\d*)\/(reference-image|clear-reference)$/);
@@ -106,6 +109,13 @@ export function createApp(database) {
         const id = Number(deleteConfigRoute?.[1] ?? deleteProjectRoute[3] ?? deleteProjectRoute[1]);
         const projectId = deleteProjectRoute?.[2] ? Number(deleteProjectRoute[1]) : undefined;
         json(200, deleteItem(database, kind, id, projectId, form));
+        return;
+      }
+      if (scriptRoute && request.method === 'POST') {
+        const [projectId, id] = scriptRoute.slice(1).map(Number);
+        const form = await readForm(request, scriptRoute[3] === 'script' ? 1024 * 1024 : 32768);
+        if (![projectId, id].every(Number.isSafeInteger)) { json(404, { error: '集不存在' }); return; }
+        json(200, scriptRoute[3] === 'script' ? saveEpisodeScript(database, projectId, id, form) : await generateEpisodeScript(database, projectId, id, form));
         return;
       }
       if (referenceRoute && request.method === 'POST') {
@@ -186,7 +196,7 @@ export function createApp(database) {
 
       if (request.method !== 'GET' && request.method !== 'HEAD') {
         request.resume();
-        send(405, 'text/plain', '暂不支持此操作', { Allow: path === '/projects' || creationRoute || characterRoute || settingsRoute || generationRoute || referenceRoute || deleteProjectRoute || deleteConfigRoute ? 'POST' : 'GET, HEAD' });
+        send(405, 'text/plain', '暂不支持此操作', { Allow: path === '/projects' || creationRoute || scriptRoute || characterRoute || settingsRoute || generationRoute || referenceRoute || deleteProjectRoute || deleteConfigRoute ? 'POST' : 'GET, HEAD' });
         return;
       }
       if (path === '/') {
@@ -261,7 +271,7 @@ export function createApp(database) {
       send(asset ? 200 : 404, asset?.type ?? 'text/plain', asset ? await readFile(asset.file) : '页面不存在');
     } catch (error) {
       if (!error.status) console.error('处理请求失败：', error);
-      if (!response.headersSent) json(error.status ?? 500, { error: error.status ? error.message : '暂时无法完成操作，请稍后重试。', ...(error.recoveryImage ? { recoveryImage: error.recoveryImage } : {}) });
+      if (!response.headersSent) json(error.status ?? 500, { error: error.status ? error.message : '暂时无法完成操作，请稍后重试。', ...(error.recoveryImage ? { recoveryImage: error.recoveryImage } : {}), ...(error.recoveryText ? { recoveryText: error.recoveryText } : {}) });
     }
   });
   server.on('close', () => database.close());

@@ -43,6 +43,14 @@ export async function callModel(config, endpoint, body, timeout = 180000) {
   return result;
 }
 
+export function readTextResult(result) {
+  const content = result?.choices?.[0]?.message?.content;
+  const text = typeof content === 'string' ? content : Array.isArray(content)
+    ? content.filter(part => part?.type === 'text' && typeof part.text === 'string').map(part => part.text).join('\n') : '';
+  if (!text.trim()) reject('模型接口未返回有效文本结果，请检查模型响应及输出 token 限制。');
+  return text;
+}
+
 export function readImageResult(config, result) {
   // shortcut: 仅支持 OpenAI 同步图片结果，接入异步任务服务时再补查询协议。
   if (!Array.isArray(result?.data) || result.data.length !== 1) reject('模型接口未返回单张图片结果；异步任务或非标准响应不能当作生成成功。');

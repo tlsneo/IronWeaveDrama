@@ -1,4 +1,4 @@
-import { callModel, imageMime, readImageResult, safeModelText } from './model-client.js';
+import { callModel, imageMime, readImageResult, readTextResult, safeModelText } from './model-client.js';
 
 export const apiTypes = new Map([
   ['text_to_image', '文生图配置'],
@@ -68,10 +68,7 @@ export async function checkApiConfig(database, id, form) {
   }
   const result = await callModel(config, endpoint, body, isText ? 60000 : 180000);
   if (isText) {
-    const content = result?.choices?.[0]?.message?.content;
-    const text = typeof content === 'string' ? content : Array.isArray(content) ? content.filter(part => part?.type === 'text' && typeof part.text === 'string').map(part => part.text).join('\n') : '';
-    if (!text.trim()) reject(502, '模型接口未返回有效文本结果，测试失败；请检查模型响应及输出 token 限制。');
-    return { verified: true, kind: 'text', text: safeModelText(config, text).slice(0, 3000), message: '模型实际调用成功，已收到文本回复。此次测试可能计费。' };
+    return { verified: true, kind: 'text', text: safeModelText(config, readTextResult(result)).slice(0, 3000), message: '模型实际调用成功，已收到文本回复。此次测试可能计费。' };
   }
   return { verified: true, kind: 'image', image: readImageResult(config, result), message: '模型实际调用成功，已收到图片结果。此次测试可能计费；测试图不写入角色资源。' };
 }

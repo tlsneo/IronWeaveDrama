@@ -11,13 +11,14 @@ function page(fetch) {
   const main = { inert: false };
   const error = { textContent: '' };
   const characterForm = { dataset: { dirty: 'true' } };
+  const scriptForm = { dataset: { dirty: 'true' } }, scriptRecovery = { hidden: false };
   const button = { disabled: false, textContent: '删除', dataset: { deleteUrl: '/projects/1/characters/2/delete', deleteName: '林秋', deleteMessage: '确定删除林秋？角色和图片将删除，无法恢复。' }, closest: () => main.inert ? main : null };
   runInNewContext(script, {
-    document: { getElementById: id => id === 'delete-error' ? error : id === 'character-form' ? characterForm : null, querySelector: () => main, addEventListener: (event, handler) => { events[event] = handler; } },
+    document: { getElementById: id => id === 'delete-error' ? error : id === 'character-form' ? characterForm : id === 'episode-script-form' ? scriptForm : id === 'episode-script-recovery' ? scriptRecovery : null, querySelector: () => main, addEventListener: (event, handler) => { events[event] = handler; } },
     window: { confirm(message) { confirmations.push(message); return confirmed; }, location: { assign: url => redirects.push(url) }, addEventListener: (event, handler) => { events[event] = handler; } },
     fetch, URLSearchParams, Error, TypeError,
   });
-  return { main, error, button, characterForm, redirects, confirmations, confirm(value) { confirmed = value; }, click: () => events.click({ target: { closest: () => button }, preventDefault() {} }), beforeUnload: event => events.beforeunload(event) };
+  return { main, error, button, characterForm, scriptForm, scriptRecovery, redirects, confirmations, confirm(value) { confirmed = value; }, click: () => events.click({ target: { closest: () => button }, preventDefault() {} }), beforeUnload: event => events.beforeunload(event) };
 }
 
 test('删除必须先确认，取消不发送请求；确认后显示删除中、防重复请求，成功只跳转一次且不再弹未保存提醒', async () => {
@@ -46,6 +47,8 @@ test('删除必须先确认，取消不发送请求；确认后显示删除中�
   await pending;
   assert.deepEqual(p.redirects, ['/projects/1?resource=characters']);
   assert.equal(p.characterForm.dataset.dirty, '');
+  assert.equal(p.scriptForm.dataset.dirty, '');
+  assert.equal(p.scriptRecovery.hidden, true);
 });
 
 test('删除失败保留页面与编辑输入，恢复按钮；网络失败只提示刷新，不自动重试', async () => {
@@ -53,6 +56,8 @@ test('删除失败保留页面与编辑输入，恢复按钮；网络失败只�
   await p.click();
   assert.deepEqual(p.redirects, []);
   assert.equal(p.characterForm.dataset.dirty, 'true');
+  assert.equal(p.scriptForm.dataset.dirty, 'true');
+  assert.equal(p.scriptRecovery.hidden, false);
   assert.equal(p.button.disabled, false);
   assert.equal(p.button.textContent, '删除');
   assert.equal(p.main.inert, false);

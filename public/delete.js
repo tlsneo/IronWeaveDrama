@@ -20,6 +20,10 @@
       if (!response.ok) throw new Error(result.error ?? '删除失败。');
       const characterForm = document.getElementById('character-form');
       if (characterForm) characterForm.dataset.dirty = '';
+      const scriptForm = document.getElementById('episode-script-form');
+      if (scriptForm) scriptForm.dataset.dirty = '';
+      const scriptRecovery = document.getElementById('episode-script-recovery');
+      if (scriptRecovery) scriptRecovery.hidden = true;
       busy = false;
       window.location.assign(result.redirect);
     } catch (error) {

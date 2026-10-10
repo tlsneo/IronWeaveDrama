@@ -181,6 +181,18 @@ export function openDatabase(filename) {
         PRAGMA user_version = 10;
       `);
     }
+    if (database.prepare('PRAGMA user_version').get().user_version < 11) {
+      database.exec(`
+        CREATE TABLE episode_scripts (
+          episode_id INTEGER PRIMARY KEY REFERENCES episodes(id) ON DELETE CASCADE,
+          source TEXT NOT NULL DEFAULT '',
+          script TEXT NOT NULL DEFAULT '',
+          notes TEXT NOT NULL DEFAULT '',
+          revision INTEGER NOT NULL CHECK (revision > 0)
+        );
+        PRAGMA user_version = 11;
+      `);
+    }
     if (database.prepare('PRAGMA foreign_key_check').all().length) throw new Error('数据库关系检查失败，升级已回滚。');
     database.exec('COMMIT');
     database.exec('PRAGMA foreign_keys = ON');
