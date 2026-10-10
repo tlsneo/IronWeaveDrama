@@ -266,6 +266,22 @@ test('修图或生图期间禁止清空，避免结果回写覆盖用户动作',
   assert.equal(f.database.prepare('SELECT count(*) AS count FROM character_boards WHERE cleared = 1').get().count, 0);
 });
 
+test('付费生成或修图进行中不能删除角色或所属短剧，完成后才能删除，避免丢失付费结果', async t => {
+  const f = await fixture(t);
+  const started = f.pause();
+  const pending = f.post(f.fields());
+  await started;
+  for (const [path, name] of [['/projects/1/characters/1/delete', '林秋'], ['/projects/1/delete', '原项目']]) {
+    const response = await f.post({ confirmed: 'yes', name }, path);
+    assert.equal(response.status, 409);
+    assert.match((await response.json()).error, /等待完成后再删除/);
+  }
+  f.resume();
+  assert.equal((await pending).status, 200);
+  assert.equal((await f.post({ confirmed: 'yes', name: '林秋' }, '/projects/1/characters/1/delete')).status, 200);
+  assert.equal(f.database.prepare('SELECT count(*) AS count FROM character_boards').get().count, 0);
+});
+
 test('图片识别支持 PNG、JPEG、WebP 三种尺寸头，拒绝空图片及不安全尺寸', () => {
   assert.deepEqual(imageDetails(png()), { mime: 'image/png', width: 16, height: 9 });
   const jpeg = Buffer.from([255, 216, 255, 192, 0, 11, 8, 0, 9, 0, 16, 1, 1, 17, 0, 255, 217]);
@@ -317,7 +333,7 @@ test('版本 7 升级保留旧图片，默认不清空；升级失败回滚，�
     assert.deepEqual(database.prepare('SELECT * FROM character_boards').get(), original);
     database.close();
     database = openDatabase(filename);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 8);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 9);
     assert.deepEqual({ ...database.prepare('SELECT * FROM character_boards').get() }, { ...original, cleared: 0 });
     database.exec('UPDATE character_boards SET cleared = 1');
     database.close();
@@ -345,7 +361,7 @@ test('版本 6 升级保留所有项目、角色和 API；迁移失败完整回�
     assert.equal(database.prepare("SELECT name FROM sqlite_master WHERE name = 'character_boards'").get(), undefined);
     database.close();
     database = openDatabase(filename);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 8);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 9);
     assert.deepEqual(['projects', 'characters', 'api_configs'].map(table => database.prepare(`SELECT * FROM ${table}`).all()), original);
     assert.equal(database.prepare('SELECT count(*) AS count FROM character_boards').get().count, 0);
   } finally { t.mock.restoreAll(); database?.close(); await rm(directory, { recursive: true, force: true }); }

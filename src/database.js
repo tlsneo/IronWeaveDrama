@@ -14,7 +14,8 @@ export function inTransaction(database, action) {
 
 export function openDatabase(filename) {
   const database = new DatabaseSync(filename);
-  database.exec('PRAGMA foreign_keys = ON');
+  // 重建主键表时暂时关闭级联，提交前检查关系，提交后恢复约束。
+  database.exec('PRAGMA foreign_keys = OFF');
   database.exec('BEGIN IMMEDIATE');
   try {
     if (database.prepare('PRAGMA user_version').get().user_version === 0) {
@@ -151,7 +152,21 @@ export function openDatabase(filename) {
     if (database.prepare('PRAGMA user_version').get().user_version < 8) {
       database.exec('ALTER TABLE character_boards ADD COLUMN cleared INTEGER NOT NULL DEFAULT 0 CHECK (cleared IN (0, 1)); PRAGMA user_version = 8;');
     }
+    if (database.prepare('PRAGMA user_version').get().user_version < 9) {
+      // 删除后 ID 不复用，避免旧卡片或图片链接指向新记录。
+      for (const table of ['projects', 'seasons', 'episodes', 'characters', 'api_configs', 'character_boards']) {
+        const sql = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?").get(table).sql;
+        if (/AUTOINCREMENT/i.test(sql)) continue;
+        const indexes = database.prepare("SELECT sql FROM sqlite_master WHERE type = 'index' AND tbl_name = ? AND sql IS NOT NULL").all(table);
+        database.exec(sql.replace(/^CREATE TABLE\s+(?:"[^"]+"|\w+)/i, `CREATE TABLE ${table}_new`).replace('id INTEGER PRIMARY KEY', 'id INTEGER PRIMARY KEY AUTOINCREMENT'));
+        database.exec(`INSERT INTO ${table}_new SELECT * FROM ${table}; DROP TABLE ${table}; ALTER TABLE ${table}_new RENAME TO ${table};`);
+        for (const index of indexes) database.exec(index.sql);
+      }
+      database.exec('PRAGMA user_version = 9');
+    }
+    if (database.prepare('PRAGMA foreign_key_check').all().length) throw new Error('数据库关系检查失败，升级已回滚。');
     database.exec('COMMIT');
+    database.exec('PRAGMA foreign_keys = ON');
     return database;
   } catch (error) {
     database.exec('ROLLBACK');

@@ -3,13 +3,14 @@ import { createServer } from 'node:http';
 import { inTransaction } from './database.js';
 import { changeCreation } from './creation.js';
 import { renderCreation } from './render-creation.js';
-import { escapeHtml } from './html.js';
+import { escapeHtml, deleteButton } from './html.js';
 import { saveCharacter } from './characters.js';
 import { renderCharacters } from './render-characters.js';
 import { saveApiConfig, checkApiConfig } from './settings.js';
 import { renderSettings } from './render-settings.js';
 import { generateCharacterBoard, clearCharacterBoard } from './character-images.js';
 import { findCharacter } from './characters.js';
+import { deleteItem } from './deletion.js';
 
 const resourceTypes = new Map([
   ['characters', { name: '角色', description: '管理这部短剧的基础角色与参考图' }],
@@ -25,6 +26,7 @@ for (const [path, type] of [
   ['/studio.js', 'text/javascript'],
   ['/settings.js', 'text/javascript'],
   ['/character-images.js', 'text/javascript'],
+  ['/delete.js', 'text/javascript'],
 ]) {
   assets.set(path, { type, file: new URL(`../public${path}`, import.meta.url) });
 }
@@ -66,6 +68,7 @@ async function renderLibrary(projects) {
           <div class="project-meta"><span>${escapeHtml(project.style)}</span><span>${escapeHtml(project.aspectRatio)}</span></div>
         </div>
       </a>
+      <div class="card-actions">${deleteButton(`/projects/${project.id}/delete`, project.name, `确定删除短剧“${project.name}”？全部季、集、角色及图片将一并删除，无法恢复。`)}</div>
     </article>`).join('')}</section>`;
 }
 
@@ -85,6 +88,8 @@ export function createApp(database) {
     }
     const json = (status, value) => send(status, 'application/json', JSON.stringify(value));
     const path = request.url.split('?')[0];
+    const deleteProjectRoute = path.match(/^\/projects\/([1-9]\d*)(?:\/(characters|seasons|episodes)\/([1-9]\d*))?\/delete$/);
+    const deleteConfigRoute = path.match(/^\/settings\/api\/([1-9]\d*)\/delete$/);
     const creationRoute = path.match(/^\/projects\/([1-9]\d*)\/(seasons|episodes)(?:\/([1-9]\d*)(\/move)?)?$/);
     const characterRoute = path.match(/^\/projects\/([1-9]\d*)\/characters(?:\/([1-9]\d*))?$/);
     const generationRoute = path.match(/^\/projects\/([1-9]\d*)\/characters\/([1-9]\d*)\/(generate|edit-image|clear-image)$/);
@@ -92,6 +97,14 @@ export function createApp(database) {
     const settingsRoute = path.match(/^\/settings\/api(?:\/([1-9]\d*)(\/check)?)?$/);
 
     try {
+      if ((deleteProjectRoute || deleteConfigRoute) && request.method === 'POST') {
+        const form = await readForm(request);
+        const kind = deleteConfigRoute ? 'api_configs' : deleteProjectRoute[2] ?? 'projects';
+        const id = Number(deleteConfigRoute?.[1] ?? deleteProjectRoute[3] ?? deleteProjectRoute[1]);
+        const projectId = deleteProjectRoute?.[2] ? Number(deleteProjectRoute[1]) : undefined;
+        json(200, deleteItem(database, kind, id, projectId, form));
+        return;
+      }
       if (generationRoute && request.method === 'POST') {
         const [projectId, id] = generationRoute.slice(1).map(Number);
         const form = await readForm(request, 32768);
@@ -157,7 +170,7 @@ export function createApp(database) {
 
       if (request.method !== 'GET' && request.method !== 'HEAD') {
         request.resume();
-        send(405, 'text/plain', '暂不支持此操作', { Allow: path === '/projects' || creationRoute || characterRoute || settingsRoute || generationRoute ? 'POST' : 'GET, HEAD' });
+        send(405, 'text/plain', '暂不支持此操作', { Allow: path === '/projects' || creationRoute || characterRoute || settingsRoute || generationRoute || deleteProjectRoute || deleteConfigRoute ? 'POST' : 'GET, HEAD' });
         return;
       }
       if (path === '/') {

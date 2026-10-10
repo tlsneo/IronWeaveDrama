@@ -1,6 +1,6 @@
 import { readFile } from 'node:fs/promises';
 import { apiTypes, readApiConfig } from './settings.js';
-import { escapeHtml } from './html.js';
+import { escapeHtml, deleteButton } from './html.js';
 
 export async function renderSettings(database, query) {
   const filter = query.get('type') ?? 'all';
@@ -59,6 +59,7 @@ export async function renderSettings(database, query) {
         <dl class="api-card-meta"><div><dt>模型</dt><dd>${escapeHtml(config.model)}</dd></div><div><dt>接口地址</dt><dd>${escapeHtml(config.baseUrl)}</dd></div></dl>
         <p class="api-card-footer"><span>${config.hasApiKey ? '密钥已配置' : '密钥未配置'}</span><span>查看配置 →</span></p>
       </a>
+      <div class="card-actions">${deleteButton(`/settings/api/${config.id}/delete`, config.name, `确定删除 API 配置“${config.name}”？地址、密钥及模型配置将删除，已生成的图片不受影响。`)}</div>
     </article>`).join('')}</section>` : `<section class="studio-empty"><h3>${filter === 'all' ? '还没有 API 配置' : `还没有${apiTypes.get(filter)}`}</h3><p>点击“添加配置”，选择用途并填写接口信息。同一类型可以添加多条配置。</p></section>`;
   }
   return template.replace('<!-- API_SETTINGS -->', () => content);

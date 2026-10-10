@@ -8,6 +8,10 @@ import { baseCharacterBoard } from '../prompts/character/base-board.js';
 const generating = new WeakMap();
 function reject(status, message) { throw Object.assign(new Error(message), { status }); }
 
+export function assertCharacterImagesIdle(database, ids) {
+  if (ids.some(id => generating.get(database)?.has(id))) reject(409, '角色正在生成或修图，请等待完成后再删除。');
+}
+
 export function characterRevision(character, style) {
   return createHash('sha256').update(JSON.stringify([style, ...characterFields.map(field => character[field.column])])).digest('hex');
 }
