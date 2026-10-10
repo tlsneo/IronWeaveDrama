@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { characterFields, findCharacter } from './characters.js';
 import { escapeHtml } from './html.js';
 import { baseCharacterBoard } from '../prompts/character/base-board.js';
+import { characterRevision, characterBoardUrl } from './character-images.js';
 
 function renderField(field, character) {
   const value = escapeHtml(String(character[field.column] ?? ''));
@@ -20,6 +21,11 @@ export async function renderCharacters(database, projectId, project, query) {
     if (query.getAll('character').length !== 1 || !/^[1-9]\d*$/.test(raw) || !Number.isSafeInteger(id)) throw Object.assign(new Error('角色不存在'), { status: 404 });
     const character = findCharacter(database, projectId, id);
     const groups = [...new Set(characterFields.map(field => field.group))];
+    const revision = characterRevision(character, project.style);
+    const board = database.prepare('SELECT id, revision FROM character_boards WHERE character_id = ? AND valid = 1 ORDER BY id DESC LIMIT 1').get(id);
+    const latest = database.prepare('SELECT id, valid, width, height FROM character_boards WHERE character_id = ? ORDER BY id DESC LIMIT 1').get(id);
+    const configs = database.prepare("SELECT id, name, model, base_url AS baseUrl FROM api_configs WHERE type = 'text_to_image' ORDER BY id").all();
+    const adult = Number.isSafeInteger(character.age) && character.age >= 18;
     const content = `<div class="character-editor">
       <form id="character-form" data-url="/projects/${projectId}/characters/${id}" aria-label="角色基础外观">
         <div class="character-edit-toolbar"><a class="episode-back" href="${base}">← 角色库</a><button class="create-button" type="submit">保存资料</button></div>
@@ -28,9 +34,19 @@ export async function renderCharacters(database, projectId, project, query) {
       </form>
       <aside class="character-preview" aria-label="基础角色板预览">
         <div class="character-preview-heading"><h3>基础角色板</h3><span>${baseCharacterBoard.aspectRatio}</span></div>
-        <div class="character-board-empty"><span aria-hidden="true">${escapeHtml([...character.name][0])}</span><p>尚未生成角色板</p></div>
+        <a id="character-board-link" ${latest ? `href="${characterBoardUrl(projectId, id, latest.id)}"` : 'hidden'} target="_blank" rel="noopener"><img id="character-board-image" class="character-board-image" ${latest ? `src="${characterBoardUrl(projectId, id, latest.id)}"` : ''} alt="${escapeHtml(character.name)}的基础角色板生成结果"></a>
+        <div id="character-board-empty" class="character-board-empty" ${latest ? 'hidden' : ''}><span aria-hidden="true">${escapeHtml([...character.name][0])}</span><p>尚未生成角色板</p></div>
+        <p id="character-board-note" class="field-help" role="status">${latest && !latest.valid ? `上方为本次未通过的生成结果（${latest.width} × ${latest.height}），未替换原角色板。` : ''}</p>
+        <form id="character-generation-form" class="character-generation" data-url="/projects/${projectId}/characters/${id}/generate" data-revision="${revision}" data-adult="${adult}">
+          <div class="form-field"><label for="character-image-api">文生图 API</label><select id="character-image-api" name="apiConfigId" required>${configs.length !== 1 ? '<option value="">选择文生图配置</option>' : ''}${configs.map(config => `<option value="${config.id}" data-model="${escapeHtml(config.model)}" data-base-url="${escapeHtml(config.baseUrl)}">${escapeHtml(config.name)} · ${escapeHtml(config.model)}</option>`).join('')}</select></div>
+          <button id="generate-character-image" class="create-button" type="button" ${adult && configs.length ? '' : 'disabled'}>生成图片</button>
+          <p class="field-help">先保存角色资料。点击并确认后生成一张 16:9 四视图角色板，可能计费，不自动重试。模型须支持请求尺寸 2560 × 1440。</p>
+          ${!configs.length ? '<p class="field-help">尚无文生图配置，请先到<a href="/settings">设置</a>添加。</p>' : ''}
+          <p id="character-generation-error" class="form-error" role="alert"></p>
+          <p id="character-generation-status" class="field-help" role="status" aria-live="polite">${board && board.revision !== revision ? '现有图片对应旧资料；修改后的资料不会自动重新生成。' : ''}</p>
+        </form>
         <dl class="character-style"><dt>画面风格</dt><dd>${escapeHtml(project.style)}<span>继承项目</span></dd></dl>
-        <p class="field-help">资料保存不会调用 AI。参考图上传与生图尚未接入。</p>
+        <p class="field-help">资料保存不会调用 AI。生成图片保存到本地，刷新后保留。参考图生成尚未接入。</p>
         <p class="field-help">这份基础角色板模板仅适用于明确年满 18 岁的角色；其他年龄或年龄未填写时，也可以先保存角色档案。</p>
       </aside>
     </div>`;
@@ -45,7 +61,7 @@ export async function renderCharacters(database, projectId, project, query) {
   const total = database.prepare('SELECT count(*) AS count FROM characters WHERE project_id = ? AND instr(lower(name), lower(?)) > 0').get(projectId, search).count;
   const pages = Math.max(1, Math.ceil(total / 50));
   const page = Math.min(Number(rawPage), pages);
-  const characters = database.prepare('SELECT id, name, age, gender_presentation FROM characters WHERE project_id = ? AND instr(lower(name), lower(?)) > 0 ORDER BY id DESC LIMIT 50 OFFSET ?').all(projectId, search, (page - 1) * 50);
+  const characters = database.prepare('SELECT id, name, age, gender_presentation, (SELECT id FROM character_boards WHERE character_id = characters.id AND valid = 1 ORDER BY id DESC LIMIT 1) AS board_id FROM characters WHERE project_id = ? AND instr(lower(name), lower(?)) > 0 ORDER BY id DESC LIMIT 50 OFFSET ?').all(projectId, search, (page - 1) * 50);
   const actions = `<button class="create-button" type="button" data-name-dialog data-url="/projects/${projectId}/characters" data-title="创建角色" data-name="" data-season-id="">＋ 创建角色</button>`;
   const searchForm = `<div class="character-list-toolbar"><form class="character-search" action="/projects/${projectId}" method="get">
     <input type="hidden" name="resource" value="characters">
@@ -58,10 +74,10 @@ export async function renderCharacters(database, projectId, project, query) {
   if (characters.length) {
     list = `<div class="project-grid character-grid">${characters.map(character => `<article class="project-card character-card">
       <a class="project-link" href="${base}&amp;character=${character.id}">
-        <div class="project-cover character-cover" aria-hidden="true"><span>${escapeHtml([...character.name][0])}</span></div>
+        <div class="project-cover character-cover" aria-hidden="true">${character.board_id ? `<img src="${characterBoardUrl(projectId, character.id, character.board_id)}" alt="">` : `<span>${escapeHtml([...character.name][0])}</span>`}</div>
         <div class="project-details"><h3>${escapeHtml(character.name)}</h3>
           <p class="character-card-info">${escapeHtml([character.age === null ? '' : `${character.age} 岁`, character.gender_presentation].filter(Boolean).join(' · ') || '外观资料待完善')}</p>
-          <span class="character-status">未生成角色板</span>
+          <span class="character-status">${character.board_id ? '角色板已生成 · 待检查' : '未生成角色板'}</span>
         </div>
       </a>
     </article>`).join('')}</div>`;

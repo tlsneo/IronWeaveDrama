@@ -80,6 +80,74 @@ export function openDatabase(filename) {
         PRAGMA user_version = 3;
       `);
     }
+    if (database.prepare('PRAGMA user_version').get().user_version < 4) {
+      database.exec(`
+        CREATE TABLE image_api_settings (
+          id INTEGER PRIMARY KEY CHECK (id = 1),
+          base_url TEXT NOT NULL,
+          api_key TEXT NOT NULL,
+          model TEXT NOT NULL,
+          size TEXT NOT NULL
+        );
+        PRAGMA user_version = 4;
+      `);
+    }
+    if (database.prepare('PRAGMA user_version').get().user_version < 5) {
+      // 保留已保存的角色板尺寸；通用 API 配置页不再设置业务尺寸。
+      database.exec(`
+        CREATE TABLE api_configs (
+          type TEXT PRIMARY KEY NOT NULL CHECK (type IN ('text_to_image', 'llm', 'image_to_image', 'image_edit')),
+          base_url TEXT NOT NULL,
+          api_key TEXT NOT NULL,
+          model TEXT NOT NULL,
+          size TEXT
+        );
+        INSERT INTO api_configs (type, base_url, api_key, model, size)
+          SELECT 'text_to_image', base_url, api_key, model, size FROM image_api_settings;
+        DROP TABLE image_api_settings;
+        PRAGMA user_version = 5;
+      `);
+    }
+    if (database.prepare('PRAGMA user_version').get().user_version < 6) {
+      database.exec(`
+        ALTER TABLE api_configs RENAME TO api_configs_previous;
+        CREATE TABLE api_configs (
+          id INTEGER PRIMARY KEY,
+          name TEXT NOT NULL,
+          type TEXT NOT NULL CHECK (type IN ('text_to_image', 'llm', 'image_to_image', 'image_edit')),
+          base_url TEXT NOT NULL,
+          api_key TEXT NOT NULL,
+          model TEXT NOT NULL,
+          size TEXT
+        );
+        INSERT INTO api_configs (name, type, base_url, api_key, model, size)
+          SELECT CASE type WHEN 'text_to_image' THEN '文生图配置' WHEN 'llm' THEN '大语言模型配置'
+            WHEN 'image_to_image' THEN '图生图配置' ELSE '编辑图片配置' END,
+            type, base_url, api_key, model, size FROM api_configs_previous ORDER BY type;
+        DROP TABLE api_configs_previous;
+        CREATE INDEX api_configs_type ON api_configs (type, id);
+        PRAGMA user_version = 6;
+      `);
+    }
+    if (database.prepare('PRAGMA user_version').get().user_version < 7) {
+      database.exec(`
+        CREATE TABLE character_boards (
+          id INTEGER PRIMARY KEY,
+          character_id INTEGER NOT NULL REFERENCES characters(id) ON DELETE CASCADE,
+          image BLOB NOT NULL,
+          mime TEXT NOT NULL CHECK (mime IN ('image/png', 'image/jpeg', 'image/webp')),
+          width INTEGER NOT NULL CHECK (width > 0),
+          height INTEGER NOT NULL CHECK (height > 0),
+          valid INTEGER NOT NULL CHECK (valid IN (0, 1)),
+          revision TEXT NOT NULL,
+          model TEXT NOT NULL,
+          prompt TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT (datetime('now'))
+        );
+        CREATE INDEX character_boards_character ON character_boards (character_id, valid, id);
+        PRAGMA user_version = 7;
+      `);
+    }
     database.exec('COMMIT');
     return database;
   } catch (error) {

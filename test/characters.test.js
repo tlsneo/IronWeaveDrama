@@ -30,7 +30,7 @@ async function saved(response, status = 201) {
   return response.json();
 }
 
-test('角色从名称建档，卡片进入详情；模板比例不继承项目竖屏比例，不展示假上传或生图按钮', async t => {
+test('角色从名称建档，卡片进入详情；模板比例不继承项目竖屏比例，提供基础角色板下面的实际生图入口，未知年龄时禁用', async t => {
   const f = await fixture(t);
   const p = await f.project();
   const path = `/projects/${p.id}/characters`;
@@ -55,7 +55,9 @@ test('角色从名称建档，卡片进入详情；模板比例不继承项目�
   assert.match(html, /国风水墨<span>继承项目<\/span>/);
   assert.match(html, /保存资料/);
   for (const field of characterFields) assert.ok(html.includes(`name="${field.key}"`));
-  assert.doesNotMatch(html, /type="file"|<button[^>]*>生成基础角色板|name="(?:costume|props)"|例如/);
+  assert.match(html, /id="generate-character-image"[^>]*disabled>生成图片/);
+  assert.match(html, /id="character-image-api"/);
+  assert.doesNotMatch(html, /type="file"|name="(?:costume|props)"|例如/);
 });
 
 test('全部基础外观可修改、留空和保存，年龄为 0、未成年及未知均可建档，重命名后列表同步', async t => {

@@ -6,6 +6,10 @@ import { renderCreation } from './render-creation.js';
 import { escapeHtml } from './html.js';
 import { saveCharacter } from './characters.js';
 import { renderCharacters } from './render-characters.js';
+import { saveApiConfig, checkApiConfig } from './settings.js';
+import { renderSettings } from './render-settings.js';
+import { generateCharacterBoard } from './character-images.js';
+import { findCharacter } from './characters.js';
 
 const resourceTypes = new Map([
   ['characters', { name: '角色', description: '管理这部短剧的基础角色与参考图' }],
@@ -19,11 +23,13 @@ for (const [path, type] of [
   ['/theme.js', 'text/javascript'],
   ['/projects.js', 'text/javascript'],
   ['/studio.js', 'text/javascript'],
+  ['/settings.js', 'text/javascript'],
+  ['/character-images.js', 'text/javascript'],
 ]) {
   assets.set(path, { type, file: new URL(`../public${path}`, import.meta.url) });
 }
 
-async function readForm(request, maxBytes = 8192) {
+async function readForm(request, maxBytes = 8192, allowMultipart = false) {
   const reject = (status, message) => {
     request.resume();
     throw Object.assign(new Error(message), { status });
@@ -31,7 +37,10 @@ async function readForm(request, maxBytes = 8192) {
   const origin = request.headers.origin;
   if (request.headers['sec-fetch-site'] === 'cross-site' ||
       (origin && origin !== `http://${request.headers.host}` && origin !== `https://${request.headers.host}`)) reject(403, '不允许从其他网站提交。');
-  if (request.headers['content-type']?.split(';')[0].trim() !== 'application/x-www-form-urlencoded') reject(415, '不支持的提交格式。');
+  const contentType = request.headers['content-type'];
+  const multipart = allowMultipart && contentType?.split(';')[0].trim() === 'multipart/form-data';
+  if (!multipart && contentType?.split(';')[0].trim() !== 'application/x-www-form-urlencoded') reject(415, '不支持的提交格式。');
+  if (multipart) maxBytes = 6 * 1024 * 1024;
   let size = 0;
   const chunks = [];
   for await (const chunk of request.iterator({ destroyOnReturn: false })) {
@@ -39,7 +48,10 @@ async function readForm(request, maxBytes = 8192) {
     if (size > maxBytes) reject(413, '提交内容过大。');
     chunks.push(chunk);
   }
-  return new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
+  const body = Buffer.concat(chunks);
+  if (!multipart) return new URLSearchParams(body.toString('utf8'));
+  try { return await new Response(body, { headers: { 'Content-Type': contentType } }).formData(); }
+  catch { reject(400, '图片上传格式无效，请重新选择文件后测试。'); }
 }
 
 async function renderLibrary(projects) {
@@ -64,7 +76,7 @@ export function createApp(database) {
   const server = createServer(async (request, response) => {
     function send(status, type, body, headers = {}) {
       response.writeHead(status, {
-        'Content-Type': `${type}; charset=utf-8`,
+        'Content-Type': type.startsWith('image/') ? type : `${type}; charset=utf-8`,
         'Cache-Control': 'no-store',
         'X-Content-Type-Options': 'nosniff',
         ...headers,
@@ -75,8 +87,31 @@ export function createApp(database) {
     const path = request.url.split('?')[0];
     const creationRoute = path.match(/^\/projects\/([1-9]\d*)\/(seasons|episodes)(?:\/([1-9]\d*)(\/move)?)?$/);
     const characterRoute = path.match(/^\/projects\/([1-9]\d*)\/characters(?:\/([1-9]\d*))?$/);
+    const generationRoute = path.match(/^\/projects\/([1-9]\d*)\/characters\/([1-9]\d*)\/generate$/);
+    const boardRoute = path.match(/^\/projects\/([1-9]\d*)\/characters\/([1-9]\d*)\/boards\/([1-9]\d*)$/);
+    const settingsRoute = path.match(/^\/settings\/api(?:\/([1-9]\d*)(\/check)?)?$/);
 
     try {
+      if (generationRoute && request.method === 'POST') {
+        const [projectId, id] = generationRoute.slice(1).map(Number);
+        const form = await readForm(request, 32768);
+        if (![projectId, id].every(Number.isSafeInteger)) {
+          json(404, { error: '角色不存在' });
+          return;
+        }
+        json(200, await generateCharacterBoard(database, projectId, id, form));
+        return;
+      }
+      if (settingsRoute && request.method === 'POST') {
+        const form = await readForm(request, 32768, Boolean(settingsRoute[2]));
+        const id = settingsRoute[1] ? Number(settingsRoute[1]) : undefined;
+        if (id !== undefined && !Number.isSafeInteger(id)) {
+          json(404, { error: 'API 配置不存在' });
+          return;
+        }
+        json(settingsRoute[2] ? 200 : id ? 200 : 201, settingsRoute[2] ? await checkApiConfig(database, id, form) : saveApiConfig(database, id, form));
+        return;
+      }
       if (characterRoute && request.method === 'POST') {
         const projectId = Number(characterRoute[1]);
         const id = characterRoute[2] ? Number(characterRoute[2]) : undefined;
@@ -121,13 +156,29 @@ export function createApp(database) {
 
       if (request.method !== 'GET' && request.method !== 'HEAD') {
         request.resume();
-        send(405, 'text/plain', '暂不支持此操作', { Allow: path === '/projects' || creationRoute || characterRoute ? 'POST' : 'GET, HEAD' });
+        send(405, 'text/plain', '暂不支持此操作', { Allow: path === '/projects' || creationRoute || characterRoute || settingsRoute || generationRoute ? 'POST' : 'GET, HEAD' });
         return;
       }
       if (path === '/') {
         const template = await readFile(new URL('../views/index.html', import.meta.url), 'utf8');
         const library = await renderLibrary(listProjects.all());
         send(200, 'text/html', template.replace('<!-- PROJECT_LIBRARY -->', () => library));
+        return;
+      }
+      if (path === '/settings') {
+        send(200, 'text/html', await renderSettings(database, new URL(request.url, 'http://localhost').searchParams));
+        return;
+      }
+      if (boardRoute) {
+        const [projectId, id, boardId] = boardRoute.slice(1).map(Number);
+        if (![projectId, id, boardId].every(Number.isSafeInteger)) {
+          send(404, 'text/plain', '角色板不存在');
+          return;
+        }
+        findCharacter(database, projectId, id);
+        const board = database.prepare('SELECT image, mime FROM character_boards WHERE id = ? AND character_id = ?').get(boardId, id);
+        if (!board) { send(404, 'text/plain', '角色板不存在'); return; }
+        send(200, board.mime, board.image, { 'Content-Length': board.image.length });
         return;
       }
       const projectRoute = path.match(/^\/projects\/([1-9]\d*)$/);
@@ -179,7 +230,7 @@ export function createApp(database) {
       send(asset ? 200 : 404, asset?.type ?? 'text/plain', asset ? await readFile(asset.file) : '页面不存在');
     } catch (error) {
       if (!error.status) console.error('处理请求失败：', error);
-      if (!response.headersSent) json(error.status ?? 500, { error: error.status ? error.message : '暂时无法完成操作，请稍后重试。' });
+      if (!response.headersSent) json(error.status ?? 500, { error: error.status ? error.message : '暂时无法完成操作，请稍后重试。', ...(error.recoveryImage ? { recoveryImage: error.recoveryImage } : {}) });
     }
   });
   server.on('close', () => database.close());

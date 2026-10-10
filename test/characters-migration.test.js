@@ -9,7 +9,9 @@ import { openDatabase } from '../src/database.js';
 function versionTwo(filename) {
   const database = openDatabase(filename);
   database.exec(`
+    DROP TABLE character_boards;
     DROP TABLE characters;
+    DROP TABLE api_configs;
     PRAGMA user_version = 2;
     INSERT INTO projects VALUES (7, '已有短剧', '写实电影', '9:16');
     INSERT INTO seasons VALUES (12, 7, '已有季', 1);
@@ -31,7 +33,7 @@ test('版本 2 升级只新增角色表，保留项目、季和集；重启保�
     const before = originals(database);
     database.close();
     database = openDatabase(filename);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 3);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 7);
     assert.deepEqual(originals(database), before);
     assert.equal(database.prepare('SELECT count(*) AS count FROM characters').get().count, 0);
     database.prepare('INSERT INTO characters (project_id, name, age) VALUES (?, ?, ?)').run(7, '原角色', 25);
