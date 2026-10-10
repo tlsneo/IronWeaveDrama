@@ -26,7 +26,6 @@
     errorElement.textContent = '';
     if (characterForm.dataset.dirty) { errorElement.textContent = '角色资料有未保存的修改，请先保存资料再生成图片。'; return; }
     if (!api.value) { errorElement.textContent = '请选择文生图配置。'; return; }
-    if (!window.confirm('将根据已保存的角色资料和项目画风生成一张 16:9 基础角色板，可能消耗额度或扣费。不自动重试。是否继续？')) return;
     const option = api.selectedOptions[0];
     const body = new URLSearchParams({ apiConfigId: api.value, chargeConfirmed: 'yes', revision: form.dataset.revision, model: option.dataset.model, baseUrl: option.dataset.baseUrl });
     busy = true;
@@ -34,7 +33,7 @@
     form.inert = true;
     characterForm.inert = true;
     button.textContent = '生成中…';
-    statusElement.textContent = '正在生成基础角色板，请等待。不要重复提交；离开页面不会撤销已提交的请求。';
+    statusElement.textContent = '';
     try {
       const response = await fetch(form.dataset.url, { method: 'POST', body });
       const result = await response.json();

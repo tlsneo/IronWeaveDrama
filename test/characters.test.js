@@ -52,7 +52,7 @@ test('角色从名称建档，卡片进入详情；模板比例不继承项目�
   assert.match(html, /<h2 id="resource-title">林秋<\/h2>/);
   assert.match(html, /href="\?resource=characters" aria-current="page"/);
   assert.match(html, /基础角色板<\/h3><span>16:9<\/span>/);
-  assert.match(html, /国风水墨<span>继承项目<\/span>/);
+  assert.doesNotMatch(html, /class="character-style"|先保存角色资料。点击并确认|资料保存不会调用 AI|这份基础角色板模板仅适用于/);
   assert.match(html, /保存资料/);
   for (const field of characterFields) assert.ok(html.includes(`name="${field.key}"`));
   assert.match(html, /id="generate-character-image"[^>]*disabled>生成图片/);

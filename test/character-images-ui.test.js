@@ -6,7 +6,7 @@ import { runInNewContext } from 'node:vm';
 const script = await readFile(new URL('../public/character-images.js', import.meta.url), 'utf8');
 function page(fetch) {
   const events = {};
-  let confirmed = true, reloads = 0;
+  let reloads = 0;
   const nodes = {
     'character-generation-form': { dataset: { url: '/projects/1/characters/2/generate', revision: 'revision' }, addEventListener(event, handler) { events[event] = handler; } },
     'character-form': { dataset: {}, inert: false },
@@ -17,11 +17,11 @@ function page(fetch) {
     'character-board-image': { src: '/old-image' },
     'character-board-empty': { hidden: true }, 'character-board-note': { textContent: '' },
   };
-  runInNewContext(script, { document: { getElementById: id => nodes[id] }, window: { confirm: () => confirmed, location: { reload() { reloads++; } }, addEventListener(event, handler) { events[event] = handler; } }, fetch, URLSearchParams, TypeError, Error });
-  return { nodes, click: () => events.click(), confirm(value) { confirmed = value; }, beforeUnload: event => events.beforeunload(event), reloads: () => reloads };
+  runInNewContext(script, { document: { getElementById: id => nodes[id] }, window: { confirm: () => { throw new Error('角色生成不应弹出确认窗口'); }, location: { reload() { reloads++; } }, addEventListener(event, handler) { events[event] = handler; } }, fetch, URLSearchParams, TypeError, Error });
+  return { nodes, click: () => events.click(), beforeUnload: event => events.beforeunload(event), reloads: () => reloads };
 }
 
-test('生图未保存资料或取消计费确认时不调用，确认后锁定表单、防重复扣费及离开；成功刷新预览', async () => {
+test('资料已保存时点击直接生图，不弹确认窗；按钮变为生成中并防重复请求，成功刷新预览', async () => {
   let calls = 0, finish;
   const p = page((url, options) => {
     calls++;
@@ -35,9 +35,10 @@ test('生图未保存资料或取消计费确认时不调用，确认后锁定�
   p.nodes['character-form'].dataset.dirty = 'true';
   await p.click(); assert.equal(calls, 0);
   p.nodes['character-form'].dataset.dirty = '';
-  p.confirm(false); await p.click(); assert.equal(calls, 0);
-  p.confirm(true);
   const pending = p.click();
+  assert.equal(p.nodes['generate-character-image'].textContent, '生成中…');
+  assert.equal(p.nodes['generate-character-image'].disabled, true);
+  assert.equal(p.nodes['character-generation-status'].textContent, '');
   await p.click(); assert.equal(calls, 1);
   assert.equal(p.nodes['character-form'].inert, true);
   let prevented = false; p.beforeUnload({ preventDefault() { prevented = true; } }); assert.equal(prevented, true);

@@ -40,14 +40,10 @@ export async function renderCharacters(database, projectId, project, query) {
         <form id="character-generation-form" class="character-generation" data-url="/projects/${projectId}/characters/${id}/generate" data-revision="${revision}" data-adult="${adult}">
           <div class="form-field"><label for="character-image-api">文生图 API</label><select id="character-image-api" name="apiConfigId" required>${configs.length !== 1 ? '<option value="">选择文生图配置</option>' : ''}${configs.map(config => `<option value="${config.id}" data-model="${escapeHtml(config.model)}" data-base-url="${escapeHtml(config.baseUrl)}">${escapeHtml(config.name)} · ${escapeHtml(config.model)}</option>`).join('')}</select></div>
           <button id="generate-character-image" class="create-button" type="button" ${adult && configs.length ? '' : 'disabled'}>生成图片</button>
-          <p class="field-help">先保存角色资料。点击并确认后生成一张 16:9 四视图角色板，可能计费，不自动重试。模型须支持请求尺寸 2560 × 1440。</p>
           ${!configs.length ? '<p class="field-help">尚无文生图配置，请先到<a href="/settings">设置</a>添加。</p>' : ''}
           <p id="character-generation-error" class="form-error" role="alert"></p>
           <p id="character-generation-status" class="field-help" role="status" aria-live="polite">${board && board.revision !== revision ? '现有图片对应旧资料；修改后的资料不会自动重新生成。' : ''}</p>
         </form>
-        <dl class="character-style"><dt>画面风格</dt><dd>${escapeHtml(project.style)}<span>继承项目</span></dd></dl>
-        <p class="field-help">资料保存不会调用 AI。生成图片保存到本地，刷新后保留。参考图生成尚未接入。</p>
-        <p class="field-help">这份基础角色板模板仅适用于明确年满 18 岁的角色；其他年龄或年龄未填写时，也可以先保存角色档案。</p>
       </aside>
     </div>`;
     return { title: character.name, description: '全剧共用 · 只记录人物本身的外观，服饰、配饰、鞋履、武器与道具单独制作。', actions: '', content };
