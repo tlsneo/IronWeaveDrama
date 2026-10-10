@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { characterFields, findCharacter } from './characters.js';
 import { escapeHtml, deleteButton } from './html.js';
 import { baseCharacterBoard } from '../prompts/character/base-board.js';
-import { characterRevision, characterBoardUrl } from './character-images.js';
+import { characterRevision, characterBoardUrl, readCharacterReference } from './character-images.js';
 
 function renderField(field, character) {
   const value = escapeHtml(String(character[field.column] ?? ''));
@@ -22,9 +22,13 @@ export async function renderCharacters(database, projectId, project, query) {
     const character = findCharacter(database, projectId, id);
     const groups = [...new Set(characterFields.map(field => field.group))];
     const revision = characterRevision(character, project.style);
-    const board = database.prepare('SELECT id, revision FROM character_boards WHERE character_id = ? AND valid = 1 AND cleared = 0 ORDER BY id DESC LIMIT 1').get(id);
+    const board = database.prepare('SELECT id, revision, reference_id FROM character_boards WHERE character_id = ? AND valid = 1 AND cleared = 0 ORDER BY id DESC LIMIT 1').get(id);
     const latest = database.prepare('SELECT id, valid, width, height FROM character_boards WHERE character_id = ? AND cleared = 0 ORDER BY id DESC LIMIT 1').get(id);
-    const configs = database.prepare("SELECT id, name, model, base_url AS baseUrl FROM api_configs WHERE type = 'text_to_image' ORDER BY id").all();
+    const reference = readCharacterReference(database, id);
+    const apiType = reference ? 'image_to_image' : 'text_to_image';
+    const apiName = reference ? '图生图' : '文生图';
+    const referenceUrl = reference ? `/projects/${projectId}/characters/${id}/references/${reference.id}` : '';
+    const configs = database.prepare('SELECT id, name, model, base_url AS baseUrl FROM api_configs WHERE type = ? ORDER BY id').all(apiType);
     const editConfigs = database.prepare("SELECT id, name, model, base_url AS baseUrl FROM api_configs WHERE type = 'image_edit' ORDER BY id").all();
     const adult = Number.isSafeInteger(character.age) && character.age >= 18;
     const content = `<div class="character-editor">
@@ -38,16 +42,24 @@ export async function renderCharacters(database, projectId, project, query) {
         <a id="character-board-link" ${latest ? `href="${characterBoardUrl(projectId, id, latest.id)}"` : 'hidden'} target="_blank" rel="noopener"><img id="character-board-image" class="character-board-image" ${latest ? `src="${characterBoardUrl(projectId, id, latest.id)}"` : ''} alt="${escapeHtml(character.name)}的基础角色板生成结果"></a>
         <div id="character-board-empty" class="character-board-empty" ${latest ? 'hidden' : ''}><span aria-hidden="true">${escapeHtml([...character.name][0])}</span><p>尚未生成角色板</p></div>
         <p id="character-board-note" class="field-help" role="status">${latest && !latest.valid ? `上方为本次未通过的生成结果（${latest.width} × ${latest.height}），未替换原角色板。` : ''}</p>
-        <form id="character-generation-form" class="character-generation" data-url="/projects/${projectId}/characters/${id}/generate" data-revision="${revision}" data-adult="${adult}" data-board-id="${latest?.id ?? ''}">
-          <div class="form-field"><label for="character-image-api">文生图 API</label><select id="character-image-api" name="apiConfigId" required>${configs.length !== 1 ? '<option value="">选择文生图配置</option>' : ''}${configs.map(config => `<option value="${config.id}" data-model="${escapeHtml(config.model)}" data-base-url="${escapeHtml(config.baseUrl)}">${escapeHtml(config.name)} · ${escapeHtml(config.model)}</option>`).join('')}</select></div>
+        <form id="character-generation-form" class="character-generation" data-url="/projects/${projectId}/characters/${id}/generate" data-revision="${revision}" data-adult="${adult}" data-board-id="${latest?.id ?? ''}" data-reference-id="${reference?.id ?? ''}" data-reference-url="/projects/${projectId}/characters/${id}/reference-image" data-api-name="${apiName}">
+          <div class="character-reference">
+            ${reference ? `<a href="${referenceUrl}" target="_blank" rel="noopener"><img class="character-reference-image" src="${referenceUrl}" alt="${escapeHtml(character.name)}的身份参考图"></a>` : ''}
+            <div><span class="character-reference-label">身份参考图</span><div class="character-image-actions">
+              <input id="character-reference-file" type="file" accept="image/png,image/jpeg,image/webp" hidden aria-label="上传角色身份参考图">
+              <button id="upload-character-reference" class="theme-toggle" type="button">${reference ? '替换图片' : '上传图片'}</button>
+              <button id="clear-character-reference" class="theme-toggle" type="button" ${reference ? '' : 'disabled'}>移除参考图</button>
+            </div></div>
+          </div>
+          <div class="form-field"><label for="character-image-api">${apiName} API</label><select id="character-image-api" name="apiConfigId" required>${configs.length !== 1 ? `<option value="">选择${apiName}配置</option>` : ''}${configs.map(config => `<option value="${config.id}" data-model="${escapeHtml(config.model)}" data-base-url="${escapeHtml(config.baseUrl)}">${escapeHtml(config.name)} · ${escapeHtml(config.model)}</option>`).join('')}</select></div>
           <div class="character-image-actions">
             <button id="generate-character-image" class="create-button" type="button" ${adult && configs.length ? '' : 'disabled'}>生成图片</button>
             <button id="edit-character-image" class="theme-toggle" type="button" aria-controls="character-image-edit-dialog" aria-haspopup="dialog" ${latest ? '' : 'disabled'}>AI修图</button>
             <button id="clear-character-image" class="theme-toggle" type="button" ${latest ? '' : 'disabled'}>清空图像</button>
           </div>
-          ${!configs.length ? '<p class="field-help">尚无文生图配置，请先到<a href="/settings">设置</a>添加。</p>' : ''}
+          ${!configs.length ? `<p class="field-help">尚无${apiName}配置，请先到<a href="/settings?type=${apiType}">设置</a>添加。</p>` : ''}
           <p id="character-generation-error" class="form-error" role="alert"></p>
-          <p id="character-generation-status" class="field-help" role="status" aria-live="polite">${board && board.revision !== revision ? '现有图片对应旧资料；修改后的资料不会自动重新生成。' : ''}</p>
+          <p id="character-generation-status" class="field-help" role="status" aria-live="polite">${board && (board.revision !== revision || board.reference_id !== (reference?.id ?? null)) ? '现有图片对应旧资料或参考图；修改后不会自动重新生成。' : ''}</p>
         </form>
       </aside>
     </div>

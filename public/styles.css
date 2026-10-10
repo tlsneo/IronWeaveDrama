@@ -197,6 +197,9 @@ h2 { margin: 0; font-size: 23px; font-weight: 600; line-height: 1.5; }
 .character-board-image { display: block; width: 100%; aspect-ratio: 16 / 9; object-fit: contain; background: white; border-radius: 8px; }
 .character-cover img { width: 100%; height: 100%; object-fit: contain; background: white; }
 .character-generation { margin-top: 20px; }
+.character-reference { display: flex; align-items: center; gap: 12px; margin-bottom: 20px; }
+.character-reference-image { width: 72px; height: 96px; object-fit: contain; background: white; border-radius: 6px; }
+.character-reference-label { display: block; margin-bottom: 10px; font-size: 13px; }
 .character-image-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 .project-dialog.image-edit-dialog { width: min(1200px, calc(100% - 32px)); }
 .image-edit-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 20px; }

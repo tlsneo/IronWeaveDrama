@@ -11,6 +11,7 @@ import { openDatabase } from '../src/database.js';
 import { characterRevision } from '../src/character-images.js';
 import { imageDetails, loadImage } from '../src/images.js';
 import { baseCharacterBoard } from '../prompts/character/base-board.js';
+import { referenceCharacterBoard } from '../prompts/character/reference-board.js';
 
 function png(width = 16, height = 9) {
   const chunk = (type, data) => {
@@ -31,6 +32,13 @@ function png(width = 16, height = 9) {
   const pixels = Buffer.alloc((width * 3 + 1) * height, 255);
   for (let y = 0; y < height; y++) pixels[y * (width * 3 + 1)] = 0;
   return Buffer.concat([Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]), chunk('IHDR', header), chunk('IDAT', deflateSync(pixels)), chunk('IEND', Buffer.alloc(0))]);
+}
+
+function referenceForm(bytes = png(), referenceId = '') {
+  const form = new FormData();
+  form.set('referenceId', referenceId);
+  form.set('referenceImage', new Blob([bytes], { type: 'image/png' }), '身份.png');
+  return form;
 }
 
 async function listen(t, server) {
@@ -67,6 +75,7 @@ async function fixture(t, filename = ':memory:') {
     response.end(JSON.stringify(failed ? { error: { message: 'failure test-private-key' } } : { data: [useUrl ? { url: `${provider.url}/image.png` } : { b64_json: bytes.toString('base64') }] }));
   }));
   database.prepare('INSERT INTO api_configs (id, name, type, base_url, api_key, model) VALUES (1, ?, ?, ?, ?, ?)').run('文生图', 'text_to_image', provider.url + '/v1', 'test-private-key', 'actual-image-model');
+  database.prepare('INSERT INTO api_configs (id, name, type, base_url, api_key, model) VALUES (2, ?, ?, ?, ?, ?)').run('身份参考生图', 'image_to_image', provider.url + '/v1', 'test-private-key', 'actual-reference-model');
   const app = await listen(t, createApp(database));
   const fields = () => ({ apiConfigId: '1', chargeConfirmed: 'yes', revision: characterRevision(database.prepare('SELECT * FROM characters WHERE id = 1').get(), '国风水墨'), model: 'actual-image-model', baseUrl: provider.url + '/v1' });
   const post = (fields, path = '/projects/1/characters/1/generate', options = {}) => fetch(app.url + path, { method: 'POST', body: new URLSearchParams(fields), ...options });
@@ -170,7 +179,7 @@ test('服务端阻止同角色并发重复扣费；生成期间资料改变时�
   assert.equal(response.status, 200);
   const result = await response.json();
   assert.equal(result.valid, false);
-  assert.match(result.message, /资料发生变化/);
+  assert.match(result.message, /资料或参考图发生变化/);
   assert.equal(f.requests.length, 2);
   const html = await (await fetch(f.url + '/projects/1?resource=characters&character=1')).text();
   assert.ok(html.includes(`src="${result.imageUrl}"`));
@@ -257,7 +266,7 @@ test('付费生成进行中不能删除角色或所属短剧，完成后才能�
   for (const [path, name] of [['/projects/1/characters/1/delete', '林秋'], ['/projects/1/delete', '原项目']]) {
     const response = await f.post({ confirmed: 'yes', name }, path);
     assert.equal(response.status, 409);
-    assert.match((await response.json()).error, /等待完成后再删除/);
+    assert.match((await response.json()).error, /等待完成后再操作/);
   }
   f.resume();
   assert.equal((await pending).status, 200);
@@ -297,12 +306,134 @@ test('角色板在重启后保留；保存结果失败时可取回付费图片�
   } finally { reopened?.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
+test('上传参考图只保存本地图片，自动改为图生图 API；原始字节、HEAD、项目归属与输入校验完整', async t => {
+  const f = await fixture(t);
+  const path = '/projects/1/characters/1/reference-image';
+  const upload = body => fetch(f.url + path, { method: 'POST', body });
+  assert.equal((await upload(referenceForm(Buffer.from('not an image')))).status, 400);
+  assert.equal((await upload(referenceForm(Buffer.alloc(5 * 1024 * 1024 + 1)))).status, 413);
+  const duplicate = referenceForm(); duplicate.append('referenceImage', new Blob([png()]));
+  assert.equal((await upload(duplicate)).status, 400);
+  assert.equal((await fetch(f.url + path, { method: 'POST', body: referenceForm(), headers: { Origin: 'https://other.test' } })).status, 403);
+  assert.equal((await fetch(f.url + path.replace('/projects/1/', '/projects/2/'), { method: 'POST', body: referenceForm() })).status, 404);
+  const response = await upload(referenceForm()); assert.equal(response.status, 201);
+  const { referenceId } = await response.json();
+  const imageUrl = `/projects/1/characters/1/references/${referenceId}`;
+  const image = await fetch(f.url + imageUrl);
+  assert.equal(image.headers.get('content-type'), 'image/png');
+  assert.deepEqual(Buffer.from(await image.arrayBuffer()), png());
+  assert.equal((await fetch(f.url + imageUrl, { method: 'HEAD' })).status, 200);
+  assert.equal((await fetch(f.url + imageUrl.replace('/projects/1/', '/projects/2/'))).status, 404);
+  const html = await (await fetch(f.url + '/projects/1?resource=characters&character=1')).text();
+  assert.match(html, /图生图 API/); assert.match(html, /身份参考生图 · actual-reference-model/);
+  assert.doesNotMatch(html, /文生图 · actual-image-model|test-private-key/);
+  assert.ok(html.includes(`data-reference-id="${referenceId}"`));
+  assert.equal(f.requests.length, 0);
+  assert.equal(f.database.prepare('SELECT count(*) AS n FROM character_boards').get().n, 0);
+  assert.equal((await upload(referenceForm())).status, 409);
+  assert.deepEqual(Buffer.from(f.database.prepare('SELECT image FROM character_references').get().image), png());
+  f.database.exec('DELETE FROM api_configs WHERE id = 2');
+  const withoutConfig = await (await fetch(f.url + '/projects/1?resource=characters&character=1')).text();
+  assert.match(withoutConfig, /尚无图生图配置/);
+  assert.match(withoutConfig, /id="generate-character-image"[^>]*disabled/);
+  assert.equal((await f.post({ ...f.fields(), referenceId: String(referenceId) })).status, 400);
+  assert.equal(f.requests.length, 0);
+});
+
+test('参考生图上传真实图片字节和专用身份提示词，保留画风、成人与四视图规则；来源 ID 随结果保存，失败不重试', async t => {
+  const f = await fixture(t);
+  const { referenceId } = await (await fetch(f.url + '/projects/1/characters/1/reference-image', { method: 'POST', body: referenceForm() })).json();
+  const fields = { ...f.fields(), referenceId: String(referenceId), apiConfigId: '2', model: 'actual-reference-model' };
+  const response = await f.post(fields); assert.equal(response.status, 200);
+  const result = await response.json(); assert.equal(result.valid, true);
+  const request = f.requests[0];
+  assert.equal(request.path, '/v1/images/edits'); assert.equal(request.body.model, 'actual-reference-model');
+  assert.equal(request.body.size, '2560x1440'); assert.equal(request.body.n, '1');
+  assert.deepEqual(request.body.image, png());
+  assert.ok(request.body.prompt.replaceAll('\r\n', '\n').endsWith(referenceCharacterBoard.prompt));
+  assert.match(request.body.prompt, /MANDATORY ART STYLE \/ 画风: 国风水墨/);
+  assert.match(request.body.prompt, /primary anchor/);
+  assert.match(request.body.prompt, /Do not copy the reference's clothing/);
+  assert.match(request.body.prompt, /aged 18 or older/);
+  const saved = f.database.prepare('SELECT reference_id, prompt FROM character_boards').get();
+  assert.equal(saved.reference_id, referenceId);
+  assert.equal(saved.prompt, request.body.prompt.replaceAll('\r\n', '\n'));
+  f.fail(); assert.equal((await f.post(fields)).status, 502);
+  assert.equal(f.requests.length, 2);
+  assert.equal(f.database.prepare('SELECT count(*) AS n FROM character_boards').get().n, 1);
+  assert.ok((await (await fetch(f.url + '/projects/1?resource=characters&character=1')).text()).includes(result.imageUrl));
+});
+
+test('参考图快照、API 类型和成人年龄在计费前验证；替换或移除不动角色板，旧参考图保留，移除后恢复文生图', async t => {
+  const f = await fixture(t), path = '/projects/1/characters/1/reference-image';
+  const { referenceId } = await (await fetch(f.url + path, { method: 'POST', body: referenceForm() })).json();
+  const fields = { ...f.fields(), apiConfigId: '2', model: 'actual-reference-model', referenceId: String(referenceId) };
+  assert.equal((await f.post(f.fields())).status, 409);
+  assert.equal((await f.post({ ...f.fields(), referenceId: String(referenceId) })).status, 400);
+  f.database.exec('UPDATE characters SET age = 17');
+  assert.equal((await f.post({ ...fields, revision: f.fields().revision })).status, 400);
+  f.database.exec('UPDATE characters SET age = 28');
+  const { referenceId: next } = await (await fetch(f.url + path, { method: 'POST', body: referenceForm(png(10, 10), String(referenceId)) })).json();
+  assert.equal((await f.post(fields)).status, 409);
+  assert.equal((await f.post({ referenceId: String(referenceId) }, '/projects/1/characters/1/clear-reference')).status, 409);
+  assert.equal(f.requests.length, 0);
+  assert.equal((await f.post({ ...fields, referenceId: String(next) })).status, 200);
+  assert.equal((await f.post({ referenceId: String(next) }, '/projects/1/characters/1/clear-reference')).status, 200);
+  assert.equal(f.database.prepare('SELECT count(*) AS n FROM character_references WHERE cleared = 1').get().n, 2);
+  assert.equal(f.database.prepare('SELECT reference_id FROM character_boards').get().reference_id, next);
+  assert.equal((await fetch(f.url + `/projects/1/characters/1/references/${referenceId}`)).status, 200);
+  assert.equal((await f.post(f.fields())).status, 200);
+  assert.equal(f.requests.at(-1).path, '/v1/images/generations');
+  assert.equal(f.database.prepare('SELECT reference_id FROM character_boards ORDER BY id DESC').get().reference_id, null);
+});
+
+test('参考生图期间不能替换或移除；异常并发改变参考图时保留未通过结果和实际来源，不覆盖旧板', async t => {
+  const f = await fixture(t), path = '/projects/1/characters/1/reference-image';
+  const { referenceId } = await (await fetch(f.url + path, { method: 'POST', body: referenceForm() })).json();
+  const started = f.pause();
+  const pending = f.post({ ...f.fields(), apiConfigId: '2', model: 'actual-reference-model', referenceId: String(referenceId) });
+  await started;
+  assert.equal((await fetch(f.url + path, { method: 'POST', body: referenceForm(png(), String(referenceId)) })).status, 409);
+  assert.equal((await f.post({ referenceId: String(referenceId) }, '/projects/1/characters/1/clear-reference')).status, 409);
+  f.database.exec('UPDATE character_references SET cleared = 1');
+  f.resume();
+  const result = await (await pending).json();
+  assert.equal(result.valid, false); assert.match(result.message, /参考图发生变化/);
+  assert.equal(f.database.prepare('SELECT reference_id FROM character_boards').get().reference_id, referenceId);
+});
+
+test('参考图与来源关联重启后保留，删除 API 不影响图片，删除角色或短剧级联清理历史参考图', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'ironweave-reference-persist-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+  const f = await fixture(t, join(directory, 'drama.sqlite'));
+  const { referenceId } = await (await fetch(f.url + '/projects/1/characters/1/reference-image', { method: 'POST', body: referenceForm() })).json();
+  await f.post({ ...f.fields(), apiConfigId: '2', model: 'actual-reference-model', referenceId: String(referenceId) });
+  await f.close();
+  const database = openDatabase(join(directory, 'drama.sqlite'));
+  const app = await listen(t, createApp(database));
+  assert.deepEqual(Buffer.from(database.prepare('SELECT image FROM character_references').get().image), png());
+  assert.equal(database.prepare('SELECT reference_id FROM character_boards').get().reference_id, referenceId);
+  const postDelete = (path, name) => fetch(app.url + path, { method: 'POST', body: new URLSearchParams({ confirmed: 'yes', name }) });
+  assert.equal((await postDelete('/settings/api/2/delete', '身份参考生图')).status, 200);
+  assert.equal(database.prepare('SELECT count(*) AS n FROM character_references').get().n, 1);
+  assert.equal((await postDelete('/projects/1/characters/1/delete', '林秋')).status, 200);
+  assert.equal(database.prepare('SELECT count(*) AS n FROM character_references').get().n, 0);
+  database.exec("INSERT INTO characters (project_id, name) VALUES (1, '新角色')");
+  const id = database.prepare('SELECT id FROM characters').get().id;
+  const next = Number(database.prepare("INSERT INTO character_references (character_id, image, mime, width, height) VALUES (?, ?, 'image/png', 16, 9)").run(id, png()).lastInsertRowid);
+  assert.ok(next > referenceId);
+  assert.equal((await postDelete('/projects/1/delete', '原项目')).status, 200);
+  assert.equal(database.prepare('SELECT count(*) AS n FROM character_references').get().n, 0);
+  assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), []);
+});
+
 test('版本 7 升级保留旧图片，默认不清空；升级失败回滚，清空标记重启后保留', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'ironweave-clear-migrate-'));
   const filename = join(directory, 'drama.sqlite');
   let database;
   try {
     database = openDatabase(filename);
+    database.exec('ALTER TABLE character_boards DROP COLUMN reference_id; DROP TABLE character_references;');
     database.exec("INSERT INTO projects VALUES (1, '原项目', '写实', '9:16'); INSERT INTO characters (id, project_id, name, age) VALUES (1, 1, '原角色', 28); ALTER TABLE character_boards DROP COLUMN cleared; PRAGMA user_version = 7;");
     database.prepare('INSERT INTO character_boards (character_id, image, mime, width, height, valid, revision, model, prompt) VALUES (1, ?, ?, 16, 9, 1, ?, ?, ?)').run(png(), 'image/png', 'old-revision', 'old-model', 'old-prompt');
     const original = database.prepare('SELECT * FROM character_boards').get();
@@ -316,8 +447,8 @@ test('版本 7 升级保留旧图片，默认不清空；升级失败回滚，�
     assert.deepEqual(database.prepare('SELECT * FROM character_boards').get(), original);
     database.close();
     database = openDatabase(filename);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 9);
-    assert.deepEqual({ ...database.prepare('SELECT * FROM character_boards').get() }, { ...original, cleared: 0 });
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 10);
+    assert.deepEqual({ ...database.prepare('SELECT * FROM character_boards').get() }, { ...original, cleared: 0, reference_id: null });
     database.exec('UPDATE character_boards SET cleared = 1');
     database.close();
     database = openDatabase(filename);
@@ -332,7 +463,7 @@ test('版本 6 升级保留所有项目、角色和 API；迁移失败完整回�
   let database;
   try {
     database = openDatabase(filename);
-    database.exec("DROP TABLE character_boards; PRAGMA user_version = 6; INSERT INTO projects VALUES (1, '原项目', '水墨', '9:16'); INSERT INTO characters (id, project_id, name, age) VALUES (1, 1, '原角色', 28); INSERT INTO api_configs (name, type, base_url, api_key, model) VALUES ('接口', 'text_to_image', 'https://example.test/v1', 'preserved-key', 'preserved-model');");
+    database.exec("DROP TABLE character_boards; DROP TABLE character_references; PRAGMA user_version = 6; INSERT INTO projects VALUES (1, '原项目', '水墨', '9:16'); INSERT INTO characters (id, project_id, name, age) VALUES (1, 1, '原角色', 28); INSERT INTO api_configs (name, type, base_url, api_key, model) VALUES ('接口', 'text_to_image', 'https://example.test/v1', 'preserved-key', 'preserved-model');");
     const original = ['projects', 'characters', 'api_configs'].map(table => database.prepare(`SELECT * FROM ${table}`).all());
     database.close();
     const exec = DatabaseSync.prototype.exec;
@@ -344,7 +475,7 @@ test('版本 6 升级保留所有项目、角色和 API；迁移失败完整回�
     assert.equal(database.prepare("SELECT name FROM sqlite_master WHERE name = 'character_boards'").get(), undefined);
     database.close();
     database = openDatabase(filename);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 9);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 10);
     assert.deepEqual(['projects', 'characters', 'api_configs'].map(table => database.prepare(`SELECT * FROM ${table}`).all()), original);
     assert.equal(database.prepare('SELECT count(*) AS count FROM character_boards').get().count, 0);
   } finally { t.mock.restoreAll(); database?.close(); await rm(directory, { recursive: true, force: true }); }

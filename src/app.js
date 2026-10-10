@@ -8,7 +8,7 @@ import { saveCharacter, findCharacter } from './characters.js';
 import { renderCharacters } from './render-characters.js';
 import { saveApiConfig, checkApiConfig } from './settings.js';
 import { renderSettings } from './render-settings.js';
-import { generateCharacterBoard, clearCharacterBoard } from './character-images.js';
+import { generateCharacterBoard, clearCharacterBoard, saveCharacterReference, clearCharacterReference } from './character-images.js';
 import { deleteItem } from './deletion.js';
 
 const resourceTypes = new Map([
@@ -28,6 +28,7 @@ for (const [path, type] of [
   ['/delete.js', 'text/javascript'],
   ['/image-editor.js', 'text/javascript'],
   ['/image-mask.js', 'text/javascript'],
+  ['/character-reference.js', 'text/javascript'],
 ]) {
   assets.set(path, { type, file: new URL(`../public${path}`, import.meta.url) });
 }
@@ -94,7 +95,8 @@ export function createApp(database) {
     const creationRoute = path.match(/^\/projects\/([1-9]\d*)\/(seasons|episodes)(?:\/([1-9]\d*)(\/move)?)?$/);
     const characterRoute = path.match(/^\/projects\/([1-9]\d*)\/characters(?:\/([1-9]\d*))?$/);
     const generationRoute = path.match(/^\/projects\/([1-9]\d*)\/characters\/([1-9]\d*)\/(generate|edit-image|clear-image)$/);
-    const boardRoute = path.match(/^\/projects\/([1-9]\d*)\/characters\/([1-9]\d*)\/boards\/([1-9]\d*)$/);
+    const referenceRoute = path.match(/^\/projects\/([1-9]\d*)\/characters\/([1-9]\d*)\/(reference-image|clear-reference)$/);
+    const boardRoute = path.match(/^\/projects\/([1-9]\d*)\/characters\/([1-9]\d*)\/(boards|references)\/([1-9]\d*)$/);
     const settingsRoute = path.match(/^\/settings\/api(?:\/([1-9]\d*)(\/check)?)?$/);
 
     try {
@@ -104,6 +106,14 @@ export function createApp(database) {
         const id = Number(deleteConfigRoute?.[1] ?? deleteProjectRoute[3] ?? deleteProjectRoute[1]);
         const projectId = deleteProjectRoute?.[2] ? Number(deleteProjectRoute[1]) : undefined;
         json(200, deleteItem(database, kind, id, projectId, form));
+        return;
+      }
+      if (referenceRoute && request.method === 'POST') {
+        const [projectId, id] = referenceRoute.slice(1).map(Number);
+        const form = await readForm(request, 8192, referenceRoute[3] === 'reference-image');
+        if (![projectId, id].every(Number.isSafeInteger)) { json(404, { error: '角色不存在' }); return; }
+        json(referenceRoute[3] === 'reference-image' ? 201 : 200, referenceRoute[3] === 'reference-image'
+          ? await saveCharacterReference(database, projectId, id, form) : clearCharacterReference(database, projectId, id, form));
         return;
       }
       if (generationRoute && request.method === 'POST') {
@@ -176,7 +186,7 @@ export function createApp(database) {
 
       if (request.method !== 'GET' && request.method !== 'HEAD') {
         request.resume();
-        send(405, 'text/plain', '暂不支持此操作', { Allow: path === '/projects' || creationRoute || characterRoute || settingsRoute || generationRoute || deleteProjectRoute || deleteConfigRoute ? 'POST' : 'GET, HEAD' });
+        send(405, 'text/plain', '暂不支持此操作', { Allow: path === '/projects' || creationRoute || characterRoute || settingsRoute || generationRoute || referenceRoute || deleteProjectRoute || deleteConfigRoute ? 'POST' : 'GET, HEAD' });
         return;
       }
       if (path === '/') {
@@ -190,13 +200,14 @@ export function createApp(database) {
         return;
       }
       if (boardRoute) {
-        const [projectId, id, boardId] = boardRoute.slice(1).map(Number);
+        const [projectId, id, boardId] = [boardRoute[1], boardRoute[2], boardRoute[4]].map(Number);
+        const table = boardRoute[3] === 'boards' ? 'character_boards' : 'character_references';
         if (![projectId, id, boardId].every(Number.isSafeInteger)) {
           send(404, 'text/plain', '角色板不存在');
           return;
         }
         findCharacter(database, projectId, id);
-        const board = database.prepare('SELECT image, mime FROM character_boards WHERE id = ? AND character_id = ?').get(boardId, id);
+        const board = database.prepare(`SELECT image, mime FROM ${table} WHERE id = ? AND character_id = ?`).get(boardId, id);
         if (!board) { send(404, 'text/plain', '角色板不存在'); return; }
         send(200, board.mime, board.image, { 'Content-Length': board.image.length });
         return;

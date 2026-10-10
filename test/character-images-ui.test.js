@@ -82,6 +82,18 @@ test('清空图像只提交当前图片 ID，锁定操作并显示清空中，�
   assert.equal(failure.nodes['clear-character-image'].disabled, false);
 });
 
+test('存在参考图时使用页面提供的图生图配置并提交参考图快照，不在浏览器改写 prompt 或偷偷退回文生图', async () => {
+  let fields;
+  const p = page(async (url, options) => { fields = options.body; return { ok: true, json: async () => ({ valid: true }) }; });
+  p.nodes['character-generation-form'].dataset.referenceId = '8';
+  p.nodes['character-generation-form'].dataset.apiName = '图生图';
+  p.nodes['character-image-api'].value = '';
+  await p.click(); assert.match(p.nodes['character-generation-error'].textContent, /图生图配置/); assert.equal(fields, undefined);
+  p.nodes['character-image-api'].value = '9';
+  await p.click(); assert.equal(fields.get('referenceId'), '8'); assert.equal(fields.get('apiConfigId'), '9');
+  assert.equal(fields.has('prompt'), false);
+});
+
 test('生成失败保留预览，网络失败警告不要直接重复付费；保存失败时在角色板展示可取回的图片', async () => {
   const p = page(async () => { throw new TypeError('network'); });
   await p.click();

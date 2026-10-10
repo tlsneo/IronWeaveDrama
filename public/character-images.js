@@ -29,7 +29,8 @@
     if (characterForm.dataset.dirty) { errorElement.textContent = '角色资料有未保存的修改，请先保存资料。'; return; }
     const body = new URLSearchParams({ boardId: form.dataset.boardId ?? '' });
     if (action !== 'clear-image') {
-      if (!api.value) { errorElement.textContent = '请选择文生图配置。'; return; }
+      body.set('referenceId', form.dataset.referenceId ?? '');
+      if (!api.value) { errorElement.textContent = `请选择${form.dataset.apiName ?? '文生图'}配置。`; return; }
       const option = api.selectedOptions[0];
       body.set('apiConfigId', api.value);
       body.set('chargeConfirmed', 'yes');
