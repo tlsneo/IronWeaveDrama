@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="IronWeaveDrama，你的 AI 短剧创作空间。">
+  <title>剧集库 · IronWeaveDrama</title>
+  <script src="/theme.js"></script>
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <header class="site-header">
+    <a class="brand" href="/" aria-label="IronWeaveDrama 首页">
+      <span class="brand-mark" aria-hidden="true">IW</span>
+      <span>IronWeave<span class="brand-suffix">Drama</span></span>
+    </a>
+    <div class="header-actions">
+      <span class="workspace-label">本地创作空间</span>
+      <button id="theme-toggle" class="theme-toggle" type="button" hidden>切换深色</button>
+    </div>
+  </header>
+
+  <main class="workspace">
+    <div class="page-heading">
+      <div>
+        <p class="eyebrow">从一个故事开始</p>
+        <h1>剧集库</h1>
+        <p class="page-description">在这里管理你的短剧。一个项目，就是一整部作品。</p>
+      </div>
+      <div class="create-entry">
+        <button class="create-button" type="button" disabled aria-describedby="create-note">
+          <span aria-hidden="true">＋</span> 创建短剧
+        </button>
+        <p id="create-note">下一步开放项目创建</p>
+      </div>
+    </div>
+
+    <section class="empty-library" aria-labelledby="empty-title">
+      <div class="story-symbol" aria-hidden="true">
+        <svg width="56" height="56" viewBox="0 0 56 56" fill="none">
+          <rect x="10" y="9" width="36" height="38" rx="5" stroke="currentColor" stroke-width="2"/>
+          <path d="M10 21h36M19 9v12M28 9v12M37 9v12M23 29l11 6-11 6V29Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <p class="empty-eyebrow">第一部作品，等你开场</p>
+      <h2 id="empty-title">这里将放下你的每一个故事</h2>
+      <p class="empty-description">还没有短剧项目。创建后，你可以在项目中管理角色资源，<br class="desktop-break">逐步把故事变成可以播放的短剧。</p>
+      <div class="project-note">
+        <span class="note-mark" aria-hidden="true">i</span>
+        <p>一张项目卡片代表<strong>整部短剧</strong>，而不是单独一集。</p>
+      </div>
+    </section>
+
+    <footer class="workspace-footer">
+      <span>故事有自己的节奏，创作也一样。</span>
+      <span>第一步 · 剧集库</span>
+    </footer>
+  </main>
+</body>
+</html>
