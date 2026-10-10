@@ -95,8 +95,19 @@ test('小说转剧本实际调用所选 LLM，固定规则在 system、原文单
   assert.equal(request.path, '/v1/chat/completions'); assert.equal(request.authorization, 'Bearer script-test-secret');
   assert.equal(request.body.model, 'script-model'); assert.equal(request.body.stream, false); assert.equal(request.body.max_tokens, 8192);
   assert.equal(request.body.messages[0].role, 'system'); assert.equal(request.body.messages[0].content, novelToScriptPrompt);
-  assert.equal(request.body.messages[1].role, 'user'); assert.deepEqual(JSON.parse(request.body.messages[1].content), { source });
+  assert.equal(request.body.messages[1].role, 'user'); assert.deepEqual(JSON.parse(request.body.messages[1].content), { episodeNumber: 1, source });
   assert.equal(request.body.messages.length, 2); assert.equal(request.body.response_format, undefined);
+});
+
+test('场号使用本集在当前季中的实际序号，不取数据库 ID、排序位置或小说章节号，其他季不参与计数', async t => {
+  const f = await fixture(t);
+  f.database.exec("UPDATE episodes SET position = 10 WHERE id = 3; INSERT INTO episode_scripts (episode_id, source, revision) VALUES (3, '92.章节名\\n小说片段', 1)");
+  const response = await fetch(f.url + '/projects/1/episodes/3/generate-script', { method: 'POST', body: new URLSearchParams({ ...f.fields(), revision: '1' }) });
+  assert.equal(response.status, 200);
+  const input = JSON.parse(f.requests[0].body.messages[1].content);
+  assert.equal(input.episodeNumber, 2);
+  assert.match(input.source, /^92\.章节名/);
+  assert.equal(input.episode, undefined);
 });
 
 test('计费前验证已保存原文、版本、LLM 类型、模型快照及替换确认；跨项目和跨站请求不能保存或生成', async t => {

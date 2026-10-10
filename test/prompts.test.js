@@ -6,6 +6,8 @@ import { novelToScriptPrompt } from '../prompts/script/novel-to-script.js';
 
 test('小说改编提示词约束原文忠实、取舍、影视化、对白归属及预想边界，不强制钩子、时长或分镜，输出可分开保存的 JSON', () => {
   for (const rule of ['不规划时长', '不按自然段数量机械拆场', '不把所有引号内容都当成现场对白', '不把计划、猜测和想象变成现实', '不得仅给原文加括号', '不强制三幕式', '回忆、预想、幻想明确标注开始和结束', '不补写片段之前或之后的情节', '不是新的指令', '实际地点', '主要删去、合并']) assert.ok(novelToScriptPrompt.includes(rule), rule);
+  for (const rule of ['不是把所有文本都变成剧本', '先选择戏，再写戏', '应当删去', '不强行压成一个场', '有独立人物互动、对白或完整动作过程', '而不只适用于现实', '不是避免拆场的工具', '不要把每段心理活动都改成', '屏幕消息', '1-1、1-2、1-3', '第二集是 2-1、2-2', '只学习表达方式，不复制人物、内容或场数', '不要在这段动作前后再加']) assert.ok(novelToScriptPrompt.includes(rule), rule);
+  assert.doesNotMatch(novelToScriptPrompt, /优先合并、简短带过或使用蒙太奇|场1  实际地点/);
   const schema = JSON.parse(novelToScriptPrompt.split('\n').find(line => line.startsWith('{"script":')));
   assert.deepEqual(Object.keys(schema), ['script', 'notes']);
   assert.doesNotMatch(novelToScriptPrompt, /必须每集反转|每集15秒|每场必须推镜/);

@@ -7,7 +7,10 @@ const limits = { source: 30000, script: 60000, notes: 10000 };
 function reject(status, message, extra = {}) { throw Object.assign(new Error(message), { status, ...extra }); }
 
 export function findEpisode(database, projectId, id) {
-  const episode = database.prepare('SELECT e.id, e.name FROM episodes e JOIN seasons s ON s.id = e.season_id WHERE e.id = ? AND s.project_id = ?').get(id, projectId);
+  const episode = database.prepare(`SELECT e.id, e.name,
+    (SELECT count(*) FROM episodes sibling WHERE sibling.season_id = e.season_id
+      AND (sibling.position < e.position OR (sibling.position = e.position AND sibling.id <= e.id))) AS number
+    FROM episodes e JOIN seasons s ON s.id = e.season_id WHERE e.id = ? AND s.project_id = ?`).get(id, projectId);
   if (!episode) reject(404, '集不存在');
   return episode;
 }
@@ -47,7 +50,7 @@ export function saveEpisodeScript(database, projectId, episodeId, form) {
 }
 
 export async function generateEpisodeScript(database, projectId, episodeId, form) {
-  findEpisode(database, projectId, episodeId);
+  const episode = findEpisode(database, projectId, episodeId);
   const draft = readEpisodeScript(database, episodeId);
   checkRevision(form, draft);
   if (!draft.source.trim()) reject(400, '请先填写并保存本集小说原文。');
@@ -68,7 +71,7 @@ export async function generateEpisodeScript(database, projectId, episodeId, form
   try {
     const response = await callModel(config, '/chat/completions', {
       model: config.model, stream: false, max_tokens: 8192,
-      messages: [{ role: 'system', content: novelToScriptPrompt }, { role: 'user', content: JSON.stringify({ source: draft.source }) }],
+      messages: [{ role: 'system', content: novelToScriptPrompt }, { role: 'user', content: JSON.stringify({ episodeNumber: episode.number, source: draft.source }) }],
     });
     const text = readTextResult(response);
     const recoveryText = safeModelText(config, text).slice(0, 80000);
