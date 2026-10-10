@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { createApp } from '../src/app.js';
+import { openDatabase } from '../src/database.js';
 
-const server = createApp();
+const server = createApp(openDatabase(':memory:'));
 let baseUrl;
 
 before(async () => {
@@ -14,7 +15,7 @@ before(async () => {
 });
 after(() => new Promise((resolve) => server.close(resolve)));
 
-test('首页展示整部短剧的空状态，不开放尚未实现的创建操作', async () => {
+test('首页展示整部短剧的空状态和可用的创建表单', async () => {
   const response = await fetch(`${baseUrl}/`);
   assert.equal(response.status, 200);
   assert.match(response.headers.get('content-type'), /text\/html/);
@@ -23,9 +24,28 @@ test('首页展示整部短剧的空状态，不开放尚未实现的创建操�
   assert.match(html, /<h1>剧集库<\/h1>/);
   assert.match(html, /还没有短剧项目/);
   assert.match(html, /整部短剧/);
-  assert.match(html, /<button[^>]*disabled/);
+  assert.match(html, /id="create-project"/);
+  assert.doesNotMatch(html, /<button[^>]*disabled/);
+  assert.match(html, /<dialog id="create-project-dialog"/);
+  assert.match(html, /name="name"/);
+  assert.match(html, /name="style"/);
+  assert.match(html, /name="aspectRatio"/);
   assert.match(html, /id="theme-toggle"/);
   assert.match(html, /<script src="\/theme.js"><\/script>/);
+});
+
+test('画风列表覆盖主要类别，保留已有选项和自由填写', async () => {
+  const html = await (await fetch(baseUrl)).text();
+  assert.match(html, /<input[^>]*name="style"[^>]*list="visual-styles"/);
+  const list = html.match(/<datalist id="visual-styles">([\s\S]*?)<\/datalist>/)[1];
+  const styles = [...list.matchAll(/<option value="([^"]+)">/g)].map(match => match[1]);
+  assert.equal(styles.length, 40);
+  assert.equal(new Set(styles).size, styles.length);
+  for (const style of [
+    '写实电影', '国风水墨', '日系动漫', '3D 动画', '美式漫画',
+    '纪录片', '黑色电影', '写实二次元', '仙侠 3D', '韩漫纯爱',
+    '油画', '赛博朋克', '末世废土', '像素风', '低多边形',
+  ]) assert.ok(styles.includes(style), `缺少画风：${style}`);
 });
 
 test('样式支持窄屏与暗黑主题，首页查询参数不影响访问', async () => {
@@ -46,8 +66,15 @@ test('主题脚本可以加载', async () => {
   assert.match(await response.text(), /prefers-color-scheme: dark/);
 });
 
+test('创建项目脚本可以加载', async () => {
+  const response = await fetch(`${baseUrl}/projects.js`);
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get('content-type'), /text\/javascript/);
+  assert.match(await response.text(), /showModal/);
+});
+
 test('未声明的路径不能读取项目文件', async () => {
-  for (const path of ['/missing', '/package.json', '/src/server.js', '/%2e%2e/README.md']) {
+  for (const path of ['/missing', '/package.json', '/src/server.js', '/data/drama.sqlite', '/%2e%2e/README.md']) {
     assert.equal((await fetch(`${baseUrl}${path}`)).status, 404);
   }
 });

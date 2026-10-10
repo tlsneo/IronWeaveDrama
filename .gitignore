@@ -6,6 +6,7 @@ target/
 
 node_modules/
 coverage/
+data/
 *.log
 
 .env

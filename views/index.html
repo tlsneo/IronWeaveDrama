@@ -7,6 +7,7 @@
   <title>剧集库 · IronWeaveDrama</title>
   <script src="/theme.js"></script>
   <link rel="stylesheet" href="/styles.css">
+  <script src="/projects.js" defer></script>
 </head>
 <body>
   <header class="site-header">
@@ -28,33 +29,100 @@
         <p class="page-description">在这里管理你的短剧。一个项目，就是一整部作品。</p>
       </div>
       <div class="create-entry">
-        <button class="create-button" type="button" disabled aria-describedby="create-note">
+        <button id="create-project" class="create-button" type="button" aria-haspopup="dialog" aria-controls="create-project-dialog">
           <span aria-hidden="true">＋</span> 创建短剧
         </button>
-        <p id="create-note">下一步开放项目创建</p>
+        <p id="create-note">开启一部新作品</p>
       </div>
     </div>
 
-    <section class="empty-library" aria-labelledby="empty-title">
-      <div class="story-symbol" aria-hidden="true">
-        <svg width="56" height="56" viewBox="0 0 56 56" fill="none">
-          <rect x="10" y="9" width="36" height="38" rx="5" stroke="currentColor" stroke-width="2"/>
-          <path d="M10 21h36M19 9v12M28 9v12M37 9v12M23 29l11 6-11 6V29Z" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/>
-        </svg>
-      </div>
-      <p class="empty-eyebrow">第一部作品，等你开场</p>
-      <h2 id="empty-title">这里将放下你的每一个故事</h2>
-      <p class="empty-description">还没有短剧项目。创建后，你可以在项目中管理角色资源，<br class="desktop-break">逐步把故事变成可以播放的短剧。</p>
-      <div class="project-note">
-        <span class="note-mark" aria-hidden="true">i</span>
-        <p>一张项目卡片代表<strong>整部短剧</strong>，而不是单独一集。</p>
-      </div>
-    </section>
+    <!-- PROJECT_LIBRARY -->
 
     <footer class="workspace-footer">
       <span>故事有自己的节奏，创作也一样。</span>
-      <span>第一步 · 剧集库</span>
+      <span>剧集库 · 整部短剧项目</span>
     </footer>
   </main>
+
+  <dialog id="create-project-dialog" class="project-dialog" aria-labelledby="create-project-title" aria-describedby="create-project-description">
+    <form id="create-project-form" action="/projects" method="post">
+      <p class="eyebrow">开启一部新作品</p>
+      <h2 id="create-project-title">创建短剧</h2>
+      <p id="create-project-description" class="dialog-description">先为整部短剧定下名称、画面风格和比例。</p>
+      <div class="form-field">
+        <label for="project-name">短剧名称</label>
+        <input id="project-name" name="name" type="text" maxlength="80" required autofocus>
+      </div>
+      <div class="form-field">
+        <label for="project-style">画面风格</label>
+        <input id="project-style" name="style" type="text" list="visual-styles" maxlength="120" placeholder="选择常用风格，或自己填写" required aria-describedby="style-help">
+        <datalist id="visual-styles">
+          <option value="写实"></option>
+          <option value="写实电影"></option>
+          <option value="纪录片"></option>
+          <option value="黑色电影"></option>
+          <option value="复古胶片"></option>
+          <option value="恐怖氛围"></option>
+
+          <option value="日系动漫"></option>
+          <option value="美式漫画"></option>
+          <option value="卡通"></option>
+          <option value="2D 动画"></option>
+          <option value="写实二次元"></option>
+          <option value="都市 3D"></option>
+
+          <option value="国风水墨"></option>
+          <option value="中国风"></option>
+          <option value="古装影视"></option>
+          <option value="武侠影视"></option>
+
+          <option value="2D 古风"></option>
+          <option value="仙侠 3D"></option>
+          <option value="古风 3D"></option>
+          <option value="新中式国潮"></option>
+          <option value="新古风"></option>
+          <option value="都市现言漫画"></option>
+          <option value="韩漫纯爱"></option>
+
+          <option value="水彩"></option>
+          <option value="油画"></option>
+          <option value="素描"></option>
+          <option value="版画"></option>
+          <option value="印象派"></option>
+
+          <option value="奇幻"></option>
+          <option value="暗黑奇幻"></option>
+          <option value="科幻"></option>
+          <option value="赛博朋克"></option>
+          <option value="蒸汽朋克"></option>
+          <option value="末世废土"></option>
+
+          <option value="3D 渲染"></option>
+          <option value="3D 动画"></option>
+          <option value="像素风"></option>
+          <option value="低多边形"></option>
+          <option value="极简"></option>
+          <option value="唯美梦幻"></option>
+        </datalist>
+        <p id="style-help" class="field-help">描述画面呈现方式，不是剧情题材。</p>
+      </div>
+      <div class="form-field">
+        <label for="project-aspect-ratio">画面比例</label>
+        <select id="project-aspect-ratio" name="aspectRatio" required>
+          <option value="9:16">9:16 · 竖屏</option>
+          <option value="16:9">16:9 · 横屏</option>
+          <option value="21:9">21:9 · 超宽横屏</option>
+          <option value="4:3">4:3 · 横屏</option>
+          <option value="3:4">3:4 · 竖屏</option>
+          <option value="1:1">1:1 · 方形</option>
+        </select>
+      </div>
+      <p id="create-project-error" class="form-error" role="alert"></p>
+      <div class="dialog-actions">
+        <button id="cancel-create-project" class="theme-toggle" type="button">取消</button>
+        <button class="create-button" type="submit">创建短剧</button>
+      </div>
+    </form>
+  </dialog>
 </body>
 </html>

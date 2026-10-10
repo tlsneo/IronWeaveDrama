@@ -1,6 +1,10 @@
+import { mkdirSync } from 'node:fs';
 import { createApp } from './app.js';
+import { openDatabase } from './database.js';
 
-const server = createApp();
+const dataDirectory = new URL('../data/', import.meta.url);
+mkdirSync(dataDirectory, { recursive: true });
+const server = createApp(openDatabase(new URL('drama.sqlite', dataDirectory)));
 
 server.on('error', (error) => {
   console.error(`启动失败：${error.message}`);
