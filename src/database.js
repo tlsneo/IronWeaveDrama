@@ -58,6 +58,28 @@ export function openDatabase(filename) {
         PRAGMA user_version = 2;
       `);
     }
+    if (database.prepare('PRAGMA user_version').get().user_version < 3) {
+      database.exec(`
+        CREATE TABLE characters (
+          id INTEGER PRIMARY KEY,
+          project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          age INTEGER CHECK (age IS NULL OR (typeof(age) = 'integer' AND age >= 0)),
+          gender_presentation TEXT NOT NULL DEFAULT '',
+          skin_tone TEXT NOT NULL DEFAULT '',
+          face_features TEXT NOT NULL DEFAULT '',
+          hair_style TEXT NOT NULL DEFAULT '',
+          hair_color TEXT NOT NULL DEFAULT '',
+          height TEXT NOT NULL DEFAULT '',
+          body_build TEXT NOT NULL DEFAULT '',
+          body_proportions TEXT NOT NULL DEFAULT '',
+          identity_features TEXT NOT NULL DEFAULT '',
+          appearance_notes TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX characters_project ON characters (project_id, id);
+        PRAGMA user_version = 3;
+      `);
+    }
     database.exec('COMMIT');
     return database;
   } catch (error) {

@@ -4,6 +4,8 @@ import { inTransaction } from './database.js';
 import { changeCreation } from './creation.js';
 import { renderCreation } from './render-creation.js';
 import { escapeHtml } from './html.js';
+import { saveCharacter } from './characters.js';
+import { renderCharacters } from './render-characters.js';
 
 const resourceTypes = new Map([
   ['characters', { name: '角色', description: '管理这部短剧的基础角色与参考图' }],
@@ -21,7 +23,7 @@ for (const [path, type] of [
   assets.set(path, { type, file: new URL(`../public${path}`, import.meta.url) });
 }
 
-async function readForm(request) {
+async function readForm(request, maxBytes = 8192) {
   const reject = (status, message) => {
     request.resume();
     throw Object.assign(new Error(message), { status });
@@ -34,7 +36,7 @@ async function readForm(request) {
   const chunks = [];
   for await (const chunk of request.iterator({ destroyOnReturn: false })) {
     size += chunk.length;
-    if (size > 8192) reject(413, '提交内容过大。');
+    if (size > maxBytes) reject(413, '提交内容过大。');
     chunks.push(chunk);
   }
   return new URLSearchParams(Buffer.concat(chunks).toString('utf8'));
@@ -72,8 +74,20 @@ export function createApp(database) {
     const json = (status, value) => send(status, 'application/json', JSON.stringify(value));
     const path = request.url.split('?')[0];
     const creationRoute = path.match(/^\/projects\/([1-9]\d*)\/(seasons|episodes)(?:\/([1-9]\d*)(\/move)?)?$/);
+    const characterRoute = path.match(/^\/projects\/([1-9]\d*)\/characters(?:\/([1-9]\d*))?$/);
 
     try {
+      if (characterRoute && request.method === 'POST') {
+        const projectId = Number(characterRoute[1]);
+        const id = characterRoute[2] ? Number(characterRoute[2]) : undefined;
+        const form = await readForm(request, id ? 65536 : 8192);
+        if (!Number.isSafeInteger(projectId) || (id !== undefined && !Number.isSafeInteger(id))) {
+          json(404, { error: '角色不存在' });
+          return;
+        }
+        json(id ? 200 : 201, saveCharacter(database, projectId, id, form));
+        return;
+      }
       if (creationRoute && request.method === 'POST') {
         const form = await readForm(request);
         const projectId = Number(creationRoute[1]);
@@ -107,7 +121,7 @@ export function createApp(database) {
 
       if (request.method !== 'GET' && request.method !== 'HEAD') {
         request.resume();
-        send(405, 'text/plain', '暂不支持此操作', { Allow: path === '/projects' || creationRoute ? 'POST' : 'GET, HEAD' });
+        send(405, 'text/plain', '暂不支持此操作', { Allow: path === '/projects' || creationRoute || characterRoute ? 'POST' : 'GET, HEAD' });
         return;
       }
       if (path === '/') {
@@ -134,8 +148,12 @@ export function createApp(database) {
             send(404, 'text/plain', '资源分类不存在');
             return;
           }
-          const content = await readFile(new URL('../views/resource-empty.html', import.meta.url), 'utf8');
-          workspace = { title: resource.name, description: resource.description, actions: '', content: content.replaceAll('<!-- RESOURCE_NAME -->', resource.name) };
+          if (resourceType === 'characters') {
+            workspace = await renderCharacters(database, id, project, query);
+          } else {
+            const content = await readFile(new URL('../views/resource-empty.html', import.meta.url), 'utf8');
+            workspace = { title: resource.name, description: resource.description, actions: '', content: content.replaceAll('<!-- RESOURCE_NAME -->', resource.name) };
+          }
         } else if (['scripts', 'seasons', 'episode'].includes(view)) {
           workspace = renderCreation(database, id, view, query);
         } else {

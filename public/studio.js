@@ -5,12 +5,14 @@ const seasonInput = document.getElementById('creation-season-id');
 const formError = document.getElementById('name-error');
 const pageError = document.getElementById('studio-error');
 const saveButton = form.querySelector('[type="submit"]');
+const characterForm = document.getElementById('character-form');
 let moving = false;
 
 async function save(url, body) {
   const response = await fetch(url, { method: 'POST', body });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error ?? '保存失败，请重试。');
+  if (characterForm) characterForm.dataset.dirty = '';
   window.location.assign(result.redirect);
 }
 
@@ -51,18 +53,34 @@ document.getElementById('cancel-name').addEventListener('click', () => {
 dialog.addEventListener('cancel', (event) => {
   if (saveButton.disabled) event.preventDefault();
 });
-form.addEventListener('submit', async (event) => {
-  event.preventDefault();
-  if (saveButton.disabled) return;
-  saveButton.disabled = true;
-  saveButton.textContent = '保存中…';
-  formError.textContent = '';
-  try {
-    await save(form.dataset.url, new URLSearchParams(new FormData(form)));
-  } catch (error) {
-    showError(formError, error);
-  } finally {
-    saveButton.disabled = false;
-    saveButton.textContent = '保存';
-  }
-});
+function bindSave(targetForm, button, errorElement, label) {
+  targetForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (button.disabled) return;
+    button.disabled = true;
+    targetForm.inert = true;
+    button.textContent = '保存中…';
+    errorElement.textContent = '';
+    try {
+      await save(targetForm.dataset.url, new URLSearchParams(new FormData(targetForm)));
+    } catch (error) {
+      showError(errorElement, error);
+    } finally {
+      button.disabled = false;
+      targetForm.inert = false;
+      button.textContent = label;
+    }
+  });
+}
+
+bindSave(form, saveButton, formError, '保存');
+if (characterForm) {
+  bindSave(characterForm, characterForm.querySelector('[type="submit"]'), document.getElementById('character-error'), '保存资料');
+  characterForm.addEventListener('input', () => { characterForm.dataset.dirty = 'true'; });
+  window.addEventListener('beforeunload', event => {
+    if (characterForm.dataset.dirty) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+  });
+}
