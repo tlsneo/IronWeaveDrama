@@ -4,12 +4,11 @@ import { inTransaction } from './database.js';
 import { changeCreation } from './creation.js';
 import { renderCreation } from './render-creation.js';
 import { escapeHtml, deleteButton } from './html.js';
-import { saveCharacter } from './characters.js';
+import { saveCharacter, findCharacter } from './characters.js';
 import { renderCharacters } from './render-characters.js';
 import { saveApiConfig, checkApiConfig } from './settings.js';
 import { renderSettings } from './render-settings.js';
 import { generateCharacterBoard, clearCharacterBoard } from './character-images.js';
-import { findCharacter } from './characters.js';
 import { deleteItem } from './deletion.js';
 
 const resourceTypes = new Map([
@@ -27,6 +26,8 @@ for (const [path, type] of [
   ['/settings.js', 'text/javascript'],
   ['/character-images.js', 'text/javascript'],
   ['/delete.js', 'text/javascript'],
+  ['/image-editor.js', 'text/javascript'],
+  ['/image-mask.js', 'text/javascript'],
 ]) {
   assets.set(path, { type, file: new URL(`../public${path}`, import.meta.url) });
 }
@@ -112,8 +113,13 @@ export function createApp(database) {
           json(404, { error: '角色不存在' });
           return;
         }
+        if (generationRoute[3] === 'edit-image') {
+          findCharacter(database, projectId, id);
+          json(503, { error: '遮罩修图接口尚未接入，不会调用模型或回退为整图编辑。' });
+          return;
+        }
         json(200, generationRoute[3] === 'clear-image' ? clearCharacterBoard(database, projectId, id, form)
-          : await generateCharacterBoard(database, projectId, id, form, generationRoute[3] === 'edit-image'));
+          : await generateCharacterBoard(database, projectId, id, form));
         return;
       }
       if (settingsRoute && request.method === 'POST') {

@@ -198,7 +198,21 @@ h2 { margin: 0; font-size: 23px; font-weight: 600; line-height: 1.5; }
 .character-cover img { width: 100%; height: 100%; object-fit: contain; background: white; }
 .character-generation { margin-top: 20px; }
 .character-image-actions { display: flex; flex-wrap: wrap; gap: 10px; }
-.character-image-edit-panel { margin-top: 20px; }
+.project-dialog.image-edit-dialog { width: min(1200px, calc(100% - 32px)); }
+.image-edit-heading { display: flex; justify-content: space-between; align-items: center; gap: 16px; margin-bottom: 20px; }
+.image-edit-layout { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 24px; }
+.image-edit-layout > section { min-width: 0; }
+.image-edit-tools { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 12px; }
+.image-edit-tools label { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+.image-edit-tools input { width: 100px; }
+.image-edit-dialog button:disabled { opacity: .5; cursor: not-allowed; }
+.image-edit-tools [aria-pressed="true"] { outline: 2px solid #5b7962; outline-offset: 1px; }
+.image-edit-stage { position: relative; height: min(58vh, 600px); min-height: 240px; overflow: hidden; touch-action: none; user-select: none; background: #18231d; border-radius: 8px; cursor: crosshair; }
+.image-edit-stage[data-tool="pan"] { cursor: grab; }
+.image-edit-stage > img, .image-edit-stage > canvas { position: absolute; left: 0; top: 0; max-width: none; transform-origin: 0 0; pointer-events: none; }
+.image-edit-cursor { position: absolute; pointer-events: none; border: 2px solid #f16a6a; border-radius: 50%; }
+.image-edit-view-tools { margin: 12px 0; }
+.image-edit-view-tools > span { min-width: 48px; text-align: center; font-size: 13px; }
 .character-generation .field-help { line-height: 1.7; }
 .character-generation .create-button:disabled { opacity: .55; cursor: not-allowed; }
 .character-style { margin: 24px 0; font-size: 13px; line-height: 1.8; }
@@ -296,6 +310,8 @@ h2 { margin: 0; font-size: 23px; font-weight: 600; line-height: 1.5; }
   .script-links a { flex-wrap: wrap; }
   .character-fields { grid-template-columns: minmax(0, 1fr); }
   .settings-check { flex-direction: column; }
+  .image-edit-layout { grid-template-columns: minmax(0, 1fr); }
+  .project-dialog.image-edit-dialog { padding: 20px; }
   .character-fieldset, .character-preview { padding: 20px; }
 }
 

@@ -191,39 +191,22 @@ test('URL 结果下载到本地不携带密钥；拒绝未配置内网图片，�
   await assert.rejects(() => loadImage(redirect.url + '/image', redirect.url), /图片下载失败/);
 });
 
-test('AI修图使用当前预览图与所填要求，multipart 调用编辑配置；空要求和过期图片先拒绝，失败保留原图', async t => {
+test('AI修图提供完整遮罩编辑器，真实接口未接入时明确 503，不付费、不整图回退、不改变角色板', async t => {
   const f = await fixture(t);
   const original = await (await f.post(f.fields())).json();
-  f.database.prepare('INSERT INTO api_configs (id, name, type, base_url, api_key, model) VALUES (2, ?, ?, ?, ?, ?)').run('修图接口', 'image_edit', f.fields().baseUrl, 'edit-key', 'edit-model');
-  const boardId = original.imageUrl.split('/').pop();
-  const fields = { ...f.fields(), apiConfigId: '2', model: 'edit-model', boardId, instruction: '把头发改为黑色，其他保持不变' };
-  const path = '/projects/1/characters/1/edit-image';
-  assert.equal((await f.post({ ...fields, instruction: '' }, path)).status, 400);
-  assert.equal((await f.post({ ...fields, instruction: 'x'.repeat(2001) }, path)).status, 400);
-  assert.equal((await f.post({ ...fields, boardId: '99999' }, path)).status, 409);
-  assert.equal((await f.post({ ...fields, apiConfigId: '1', model: 'actual-image-model' }, path)).status, 400);
-  assert.equal((await f.post(fields, '/projects/2/characters/1/edit-image')).status, 404);
-  assert.equal(f.requests.length, 1);
-  const response = await f.post(fields, path);
-  assert.equal(response.status, 200);
-  const result = await response.json();
-  assert.equal(result.valid, true);
-  assert.notEqual(result.imageUrl, original.imageUrl);
-  const request = f.requests.at(-1);
-  assert.equal(request.path, '/v1/images/edits');
-  assert.equal(request.authorization, 'Bearer edit-key');
-  assert.equal(request.body.model, 'edit-model');
-  assert.equal(request.body.n, '1');
-  assert.equal(request.body.size, '2560x1440');
-  assert.match(request.body.prompt, /把头发改为黑色，其他保持不变/);
-  assert.ok(request.body.prompt.replaceAll('\r\n', '\n').endsWith(baseCharacterBoard.prompt));
-  assert.deepEqual(request.body.image, png());
-  f.fail();
-  const failure = await f.post({ ...fields, boardId: result.imageUrl.split('/').pop() }, path);
-  assert.equal(failure.status, 502);
   const html = await (await fetch(f.url + '/projects/1?resource=characters&character=1')).text();
-  assert.ok(html.includes(`src="${result.imageUrl}"`));
-  assert.equal(f.database.prepare('SELECT count(*) AS count FROM character_boards').get().count, 2);
+  assert.match(html, /<dialog id="character-image-edit-dialog"/);
+  for (const label of ['画笔', '橡皮擦', '平移', '笔刷', '撤销', '重做', '清空选区', '适合窗口', '下载遮罩', '修改要求']) assert.ok(html.includes(label));
+  assert.match(html, /id="submit-character-edit"[^>]*disabled/);
+  assert.match(html, /遮罩接口待接入，当前不会调用模型/);
+  const path = '/projects/1/characters/1/edit-image';
+  const response = await f.post({ ...f.fields(), boardId: original.imageUrl.split('/').pop(), instruction: '修复手指', mask: 'selected-mask' }, path);
+  assert.equal(response.status, 503);
+  assert.match((await response.json()).error, /不会调用模型或回退为整图编辑/);
+  assert.equal((await f.post({}, '/projects/2/characters/1/edit-image')).status, 404);
+  assert.equal(f.requests.length, 1);
+  assert.equal(f.database.prepare('SELECT count(*) AS count FROM character_boards').get().count, 1);
+  for (const file of ['/image-editor.js', '/image-mask.js']) assert.equal((await fetch(f.url + file)).status, 200);
 });
 
 test('清空图像不调用模型、不删除付费图片及角色资料，清空后列表和预览为空；新生图恢复显示，旧页面不能清新图片', async t => {
@@ -253,7 +236,7 @@ test('清空图像不调用模型、不删除付费图片及角色资料，清�
   assert.ok(html.includes(`src="${next.imageUrl}"`));
 });
 
-test('修图或生图期间禁止清空，避免结果回写覆盖用户动作', async t => {
+test('生图期间禁止清空，避免结果回写覆盖用户动作', async t => {
   const f = await fixture(t);
   const original = await (await f.post(f.fields())).json();
   const started = f.pause();
@@ -266,7 +249,7 @@ test('修图或生图期间禁止清空，避免结果回写覆盖用户动作',
   assert.equal(f.database.prepare('SELECT count(*) AS count FROM character_boards WHERE cleared = 1').get().count, 0);
 });
 
-test('付费生成或修图进行中不能删除角色或所属短剧，完成后才能删除，避免丢失付费结果', async t => {
+test('付费生成进行中不能删除角色或所属短剧，完成后才能删除，避免丢失付费结果', async t => {
   const f = await fixture(t);
   const started = f.pause();
   const pending = f.post(f.fields());

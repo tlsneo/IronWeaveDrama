@@ -35,7 +35,7 @@ function readCurrentBoard(database, characterId, form) {
   return board;
 }
 
-export async function generateCharacterBoard(database, projectId, characterId, form, editing = false) {
+export async function generateCharacterBoard(database, projectId, characterId, form) {
   const character = findCharacter(database, projectId, characterId);
   const project = database.prepare('SELECT style FROM projects WHERE id = ?').get(projectId);
   if (!Number.isSafeInteger(character.age) || character.age < 18) reject(400, '基础角色板模板仅适用于明确年满 18 岁的角色，请先确认并保存真实年龄。');
@@ -44,14 +44,7 @@ export async function generateCharacterBoard(database, projectId, characterId, f
   const configId = Number(form.get('apiConfigId'));
   if (!/^[1-9]\d*$/.test(form.get('apiConfigId')) || !Number.isSafeInteger(configId)) reject(400, '请选择已保存的文生图配置。');
   const config = readApiConfig(database, configId);
-  if (config.type !== (editing ? 'image_edit' : 'text_to_image') || !config.apiKey) reject(400, editing ? '请选择已保存密钥的编辑图片配置。' : '请选择已保存密钥的文生图配置。');
-  let sourceBoard, instruction;
-  if (editing) {
-    sourceBoard = readCurrentBoard(database, characterId, form);
-    if (form.getAll('instruction').length !== 1 || typeof form.get('instruction') !== 'string') reject(400, '请填写修图要求。');
-    instruction = form.get('instruction').trim();
-    if (!instruction || instruction.length > 2000) reject(400, '修图要求不能为空，最多 2000 字。');
-  }
+  if (config.type !== 'text_to_image' || !config.apiKey) reject(400, '请选择已保存密钥的文生图配置。');
   if (config.model !== form.get('model') || config.baseUrl !== form.get('baseUrl')) reject(409, 'API 配置已变化，请刷新后重新确认生成。');
   const revision = characterRevision(character, project.style);
   if (revision !== form.get('revision')) reject(409, '角色资料已变化，请先保存并刷新后再生成。');
@@ -61,17 +54,8 @@ export async function generateCharacterBoard(database, projectId, characterId, f
   active.add(characterId);
   try {
     const identity = Object.fromEntries(characterFields.filter(field => character[field.column] !== null && character[field.column] !== '').map(field => [field.label, character[field.column]]));
-    const prompt = `MANDATORY ART STYLE / 画风: ${project.style}\nApply the style only to rendering, line quality and surface treatment. Do not import costumes, scenery, props or dramatic lighting from style conventions.\n\nADULT CHARACTER IDENTITY / 成年角色基础外观:\n${JSON.stringify(identity, null, 2)}\n\n${editing ? `EDIT REQUEST: ${instruction}\nEdit the supplied reference sheet. Preserve identity, four-view layout and all template constraints below.\n\n` : ''}${baseCharacterBoard.prompt}`;
-    let body = { model: config.model, prompt, n: 1, size: '2560x1440' };
-    if (editing) {
-      body = new FormData();
-      body.set('model', config.model);
-      body.set('prompt', prompt);
-      body.set('n', '1');
-      body.set('size', '2560x1440');
-      body.set('image', new Blob([sourceBoard.image], { type: sourceBoard.mime }), `character.${sourceBoard.mime === 'image/jpeg' ? 'jpg' : sourceBoard.mime.split('/')[1]}`);
-    }
-    const response = await callModel(config, editing ? '/images/edits' : '/images/generations', body);
+    const prompt = `MANDATORY ART STYLE / 画风: ${project.style}\nApply the style only to rendering, line quality and surface treatment. Do not import costumes, scenery, props or dramatic lighting from style conventions.\n\nADULT CHARACTER IDENTITY / 成年角色基础外观:\n${JSON.stringify(identity, null, 2)}\n\n${baseCharacterBoard.prompt}`;
+    const response = await callModel(config, '/images/generations', { model: config.model, prompt, n: 1, size: '2560x1440' });
     const source = readImageResult(config, response);
     const bytes = await loadImage(source, config.baseUrl);
     const { mime, width, height } = imageDetails(bytes);

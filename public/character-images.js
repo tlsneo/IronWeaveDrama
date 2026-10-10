@@ -5,11 +5,7 @@
   const button = document.getElementById('generate-character-image');
   const editButton = document.getElementById('edit-character-image');
   const clearButton = document.getElementById('clear-character-image');
-  const editPanel = document.getElementById('character-image-edit-panel');
-  const submitEdit = document.getElementById('submit-character-edit');
   const api = document.getElementById('character-image-api');
-  const editApi = document.getElementById('character-edit-api');
-  const instruction = document.getElementById('character-edit-instruction');
   const errorElement = document.getElementById('character-generation-error');
   const statusElement = document.getElementById('character-generation-status');
   const boardLink = document.getElementById('character-board-link');
@@ -27,35 +23,25 @@
   }
 
   form.addEventListener('submit', event => event.preventDefault());
-  editButton.addEventListener('click', () => {
-    if (busy || editButton.disabled || characterForm.inert) return;
-    editPanel.hidden = !editPanel.hidden;
-    editButton.setAttribute('aria-expanded', String(!editPanel.hidden));
-    if (!editPanel.hidden) instruction.focus();
-  });
-
   async function run(action, activeButton, label) {
     if (busy || activeButton.disabled || characterForm.inert) return;
     errorElement.textContent = '';
     if (characterForm.dataset.dirty) { errorElement.textContent = '角色资料有未保存的修改，请先保存资料。'; return; }
     const body = new URLSearchParams({ boardId: form.dataset.boardId ?? '' });
     if (action !== 'clear-image') {
-      const selectedApi = action === 'edit-image' ? editApi : api;
-      if (!selectedApi.value) { errorElement.textContent = action === 'edit-image' ? '请选择编辑图片配置。' : '请选择文生图配置。'; return; }
-      if (action === 'edit-image' && !instruction.value.trim()) { errorElement.textContent = '请填写修图要求。'; return; }
-      const option = selectedApi.selectedOptions[0];
-      body.set('apiConfigId', selectedApi.value);
+      if (!api.value) { errorElement.textContent = '请选择文生图配置。'; return; }
+      const option = api.selectedOptions[0];
+      body.set('apiConfigId', api.value);
       body.set('chargeConfirmed', 'yes');
       body.set('revision', form.dataset.revision);
       body.set('model', option.dataset.model);
       body.set('baseUrl', option.dataset.baseUrl);
-      if (action === 'edit-image') body.set('instruction', instruction.value.trim());
     }
     busy = true;
     activeButton.disabled = true;
     form.inert = true;
     characterForm.inert = true;
-    activeButton.textContent = action === 'clear-image' ? '清空中…' : action === 'edit-image' ? '修图中…' : '生成中…';
+    activeButton.textContent = action === 'clear-image' ? '清空中…' : '生成中…';
     statusElement.textContent = '';
     try {
       const response = await fetch(form.dataset.url.replace(/generate$/, action), { method: 'POST', body });
@@ -76,7 +62,7 @@
       } else {
         showImage(result.imageUrl, result.message);
         form.dataset.boardId = result.imageUrl.split('/').pop();
-        editButton.disabled = form.dataset.adult !== 'true';
+        editButton.disabled = false;
         clearButton.disabled = false;
       }
     } catch (error) {
@@ -93,7 +79,6 @@
     }
   }
   button.addEventListener('click', () => run('generate', button, '生成图片'));
-  submitEdit.addEventListener('click', () => run('edit-image', submitEdit, '开始修图'));
   clearButton.addEventListener('click', () => run('clear-image', clearButton, '清空图像'));
   window.addEventListener('beforeunload', event => {
     if (busy) { event.preventDefault(); event.returnValue = ''; }
