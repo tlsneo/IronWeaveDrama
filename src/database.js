@@ -148,6 +148,9 @@ export function openDatabase(filename) {
         PRAGMA user_version = 7;
       `);
     }
+    if (database.prepare('PRAGMA user_version').get().user_version < 8) {
+      database.exec('ALTER TABLE character_boards ADD COLUMN cleared INTEGER NOT NULL DEFAULT 0 CHECK (cleared IN (0, 1)); PRAGMA user_version = 8;');
+    }
     database.exec('COMMIT');
     return database;
   } catch (error) {

@@ -22,9 +22,10 @@ export async function renderCharacters(database, projectId, project, query) {
     const character = findCharacter(database, projectId, id);
     const groups = [...new Set(characterFields.map(field => field.group))];
     const revision = characterRevision(character, project.style);
-    const board = database.prepare('SELECT id, revision FROM character_boards WHERE character_id = ? AND valid = 1 ORDER BY id DESC LIMIT 1').get(id);
-    const latest = database.prepare('SELECT id, valid, width, height FROM character_boards WHERE character_id = ? ORDER BY id DESC LIMIT 1').get(id);
+    const board = database.prepare('SELECT id, revision FROM character_boards WHERE character_id = ? AND valid = 1 AND cleared = 0 ORDER BY id DESC LIMIT 1').get(id);
+    const latest = database.prepare('SELECT id, valid, width, height FROM character_boards WHERE character_id = ? AND cleared = 0 ORDER BY id DESC LIMIT 1').get(id);
     const configs = database.prepare("SELECT id, name, model, base_url AS baseUrl FROM api_configs WHERE type = 'text_to_image' ORDER BY id").all();
+    const editConfigs = database.prepare("SELECT id, name, model, base_url AS baseUrl FROM api_configs WHERE type = 'image_edit' ORDER BY id").all();
     const adult = Number.isSafeInteger(character.age) && character.age >= 18;
     const content = `<div class="character-editor">
       <form id="character-form" data-url="/projects/${projectId}/characters/${id}" aria-label="角色基础外观">
@@ -37,9 +38,19 @@ export async function renderCharacters(database, projectId, project, query) {
         <a id="character-board-link" ${latest ? `href="${characterBoardUrl(projectId, id, latest.id)}"` : 'hidden'} target="_blank" rel="noopener"><img id="character-board-image" class="character-board-image" ${latest ? `src="${characterBoardUrl(projectId, id, latest.id)}"` : ''} alt="${escapeHtml(character.name)}的基础角色板生成结果"></a>
         <div id="character-board-empty" class="character-board-empty" ${latest ? 'hidden' : ''}><span aria-hidden="true">${escapeHtml([...character.name][0])}</span><p>尚未生成角色板</p></div>
         <p id="character-board-note" class="field-help" role="status">${latest && !latest.valid ? `上方为本次未通过的生成结果（${latest.width} × ${latest.height}），未替换原角色板。` : ''}</p>
-        <form id="character-generation-form" class="character-generation" data-url="/projects/${projectId}/characters/${id}/generate" data-revision="${revision}" data-adult="${adult}">
+        <form id="character-generation-form" class="character-generation" data-url="/projects/${projectId}/characters/${id}/generate" data-revision="${revision}" data-adult="${adult}" data-board-id="${latest?.id ?? ''}">
           <div class="form-field"><label for="character-image-api">文生图 API</label><select id="character-image-api" name="apiConfigId" required>${configs.length !== 1 ? '<option value="">选择文生图配置</option>' : ''}${configs.map(config => `<option value="${config.id}" data-model="${escapeHtml(config.model)}" data-base-url="${escapeHtml(config.baseUrl)}">${escapeHtml(config.name)} · ${escapeHtml(config.model)}</option>`).join('')}</select></div>
-          <button id="generate-character-image" class="create-button" type="button" ${adult && configs.length ? '' : 'disabled'}>生成图片</button>
+          <div class="character-image-actions">
+            <button id="generate-character-image" class="create-button" type="button" ${adult && configs.length ? '' : 'disabled'}>生成图片</button>
+            <button id="edit-character-image" class="theme-toggle" type="button" aria-controls="character-image-edit-panel" aria-expanded="false" ${adult && latest ? '' : 'disabled'}>AI修图</button>
+            <button id="clear-character-image" class="theme-toggle" type="button" ${latest ? '' : 'disabled'}>清空图像</button>
+          </div>
+          <div id="character-image-edit-panel" class="character-image-edit-panel" hidden>
+            <div class="form-field"><label for="character-edit-api">编辑图片 API</label><select id="character-edit-api">${editConfigs.length !== 1 ? '<option value="">选择编辑图片配置</option>' : ''}${editConfigs.map(config => `<option value="${config.id}" data-model="${escapeHtml(config.model)}" data-base-url="${escapeHtml(config.baseUrl)}">${escapeHtml(config.name)} · ${escapeHtml(config.model)}</option>`).join('')}</select></div>
+            <div class="form-field"><label for="character-edit-instruction">修图要求</label><textarea id="character-edit-instruction" maxlength="2000" rows="3"></textarea></div>
+            <button id="submit-character-edit" class="create-button" type="button" ${editConfigs.length ? '' : 'disabled'}>开始修图</button>
+            ${!editConfigs.length ? '<p class="field-help">请先到<a href="/settings?type=image_edit">设置</a>添加编辑图片配置。</p>' : ''}
+          </div>
           ${!configs.length ? '<p class="field-help">尚无文生图配置，请先到<a href="/settings">设置</a>添加。</p>' : ''}
           <p id="character-generation-error" class="form-error" role="alert"></p>
           <p id="character-generation-status" class="field-help" role="status" aria-live="polite">${board && board.revision !== revision ? '现有图片对应旧资料；修改后的资料不会自动重新生成。' : ''}</p>
@@ -57,7 +68,7 @@ export async function renderCharacters(database, projectId, project, query) {
   const total = database.prepare('SELECT count(*) AS count FROM characters WHERE project_id = ? AND instr(lower(name), lower(?)) > 0').get(projectId, search).count;
   const pages = Math.max(1, Math.ceil(total / 50));
   const page = Math.min(Number(rawPage), pages);
-  const characters = database.prepare('SELECT id, name, age, gender_presentation, (SELECT id FROM character_boards WHERE character_id = characters.id AND valid = 1 ORDER BY id DESC LIMIT 1) AS board_id FROM characters WHERE project_id = ? AND instr(lower(name), lower(?)) > 0 ORDER BY id DESC LIMIT 50 OFFSET ?').all(projectId, search, (page - 1) * 50);
+  const characters = database.prepare('SELECT id, name, age, gender_presentation, (SELECT id FROM character_boards WHERE character_id = characters.id AND valid = 1 AND cleared = 0 ORDER BY id DESC LIMIT 1) AS board_id FROM characters WHERE project_id = ? AND instr(lower(name), lower(?)) > 0 ORDER BY id DESC LIMIT 50 OFFSET ?').all(projectId, search, (page - 1) * 50);
   const actions = `<button class="create-button" type="button" data-name-dialog data-url="/projects/${projectId}/characters" data-title="创建角色" data-name="" data-season-id="">＋ 创建角色</button>`;
   const searchForm = `<div class="character-list-toolbar"><form class="character-search" action="/projects/${projectId}" method="get">
     <input type="hidden" name="resource" value="characters">

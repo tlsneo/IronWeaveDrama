@@ -8,7 +8,7 @@ import { saveCharacter } from './characters.js';
 import { renderCharacters } from './render-characters.js';
 import { saveApiConfig, checkApiConfig } from './settings.js';
 import { renderSettings } from './render-settings.js';
-import { generateCharacterBoard } from './character-images.js';
+import { generateCharacterBoard, clearCharacterBoard } from './character-images.js';
 import { findCharacter } from './characters.js';
 
 const resourceTypes = new Map([
@@ -87,7 +87,7 @@ export function createApp(database) {
     const path = request.url.split('?')[0];
     const creationRoute = path.match(/^\/projects\/([1-9]\d*)\/(seasons|episodes)(?:\/([1-9]\d*)(\/move)?)?$/);
     const characterRoute = path.match(/^\/projects\/([1-9]\d*)\/characters(?:\/([1-9]\d*))?$/);
-    const generationRoute = path.match(/^\/projects\/([1-9]\d*)\/characters\/([1-9]\d*)\/generate$/);
+    const generationRoute = path.match(/^\/projects\/([1-9]\d*)\/characters\/([1-9]\d*)\/(generate|edit-image|clear-image)$/);
     const boardRoute = path.match(/^\/projects\/([1-9]\d*)\/characters\/([1-9]\d*)\/boards\/([1-9]\d*)$/);
     const settingsRoute = path.match(/^\/settings\/api(?:\/([1-9]\d*)(\/check)?)?$/);
 
@@ -99,7 +99,8 @@ export function createApp(database) {
           json(404, { error: '角色不存在' });
           return;
         }
-        json(200, await generateCharacterBoard(database, projectId, id, form));
+        json(200, generationRoute[3] === 'clear-image' ? clearCharacterBoard(database, projectId, id, form)
+          : await generateCharacterBoard(database, projectId, id, form, generationRoute[3] === 'edit-image'));
         return;
       }
       if (settingsRoute && request.method === 'POST') {

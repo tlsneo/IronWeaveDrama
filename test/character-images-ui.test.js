@@ -8,17 +8,23 @@ function page(fetch) {
   const events = {};
   let reloads = 0;
   const nodes = {
-    'character-generation-form': { dataset: { url: '/projects/1/characters/2/generate', revision: 'revision' }, addEventListener(event, handler) { events[event] = handler; } },
+    'character-generation-form': { dataset: { url: '/projects/1/characters/2/generate', revision: 'revision', boardId: '7', adult: 'true' }, addEventListener(event, handler) { events[event] = handler; } },
     'character-form': { dataset: {}, inert: false },
     'generate-character-image': { disabled: false, textContent: '生成图片', addEventListener(event, handler) { events.click = handler; } },
     'character-image-api': { value: '3', selectedOptions: [{ dataset: { model: 'image-model', baseUrl: 'https://provider.test/v1' } }] },
+    'edit-character-image': { disabled: false, addEventListener(event, handler) { events.edit = handler; }, setAttribute(name, value) { this[name] = value; } },
+    'clear-character-image': { disabled: false, textContent: '清空图像', addEventListener(event, handler) { events.clear = handler; } },
+    'character-image-edit-panel': { hidden: true },
+    'submit-character-edit': { disabled: false, textContent: '开始修图', addEventListener(event, handler) { events.submitEdit = handler; } },
+    'character-edit-api': { value: '4', selectedOptions: [{ dataset: { model: 'edit-model', baseUrl: 'https://edit.test/v1' } }] },
+    'character-edit-instruction': { value: '', focus() {} },
     'character-generation-error': { textContent: '' }, 'character-generation-status': { textContent: '' },
     'character-board-link': { hidden: false, href: '/old-image' },
     'character-board-image': { src: '/old-image' },
     'character-board-empty': { hidden: true }, 'character-board-note': { textContent: '' },
   };
   runInNewContext(script, { document: { getElementById: id => nodes[id] }, window: { confirm: () => { throw new Error('角色生成不应弹出确认窗口'); }, location: { reload() { reloads++; } }, addEventListener(event, handler) { events[event] = handler; } }, fetch, URLSearchParams, TypeError, Error });
-  return { nodes, click: () => events.click(), beforeUnload: event => events.beforeunload(event), reloads: () => reloads };
+  return { nodes, click: () => events.click(), edit: () => events.edit(), clear: () => events.clear(), submitEdit: () => events.submitEdit(), beforeUnload: event => events.beforeunload(event), reloads: () => reloads };
 }
 
 test('资料已保存时点击直接生图，不弹确认窗；按钮变为生成中并防重复请求，成功刷新预览', async () => {
@@ -57,6 +63,56 @@ test('生成结果直接展示在基础角色板，不另放下面链接；比�
   assert.match(p.nodes['character-board-note'].textContent, /未替换/);
   assert.equal(p.reloads(), 0);
   assert.equal(p.nodes['generate-character-image'].disabled, false);
+});
+
+test('AI修图仅展开输入区不付费，填写要求后才提交编辑 API；防重复请求，失败保留图片和输入', async () => {
+  let calls = 0, finish;
+  const p = page((url, options) => {
+    calls++;
+    assert.equal(url, '/projects/1/characters/2/edit-image');
+    assert.equal(options.body.get('boardId'), '7');
+    assert.equal(options.body.get('instruction'), '头发改黑');
+    assert.equal(options.body.get('apiConfigId'), '4');
+    assert.equal(options.body.get('model'), 'edit-model');
+    return new Promise(resolve => { finish = resolve; });
+  });
+  p.edit();
+  assert.equal(p.nodes['character-image-edit-panel'].hidden, false);
+  assert.equal(p.nodes['edit-character-image']['aria-expanded'], 'true');
+  assert.equal(calls, 0);
+  await p.submitEdit();
+  assert.match(p.nodes['character-generation-error'].textContent, /修图要求/);
+  p.nodes['character-edit-instruction'].value = '头发改黑';
+  const pending = p.submitEdit();
+  assert.equal(p.nodes['submit-character-edit'].textContent, '修图中…');
+  await p.clear(); await p.click(); await p.submitEdit();
+  assert.equal(calls, 1);
+  finish({ ok: false, json: async () => ({ error: '编辑失败' }) });
+  await pending;
+  assert.equal(p.nodes['character-edit-instruction'].value, '头发改黑');
+  assert.equal(p.nodes['character-board-image'].src, '/old-image');
+  assert.equal(p.nodes['submit-character-edit'].disabled, false);
+});
+
+test('清空图像只提交当前图片 ID，锁定操作并显示清空中，成功刷新；失败不改预览', async () => {
+  let calls = 0, finish;
+  const p = page((url, options) => {
+    calls++;
+    assert.equal(url, '/projects/1/characters/2/clear-image');
+    assert.equal(options.body.toString(), 'boardId=7');
+    return new Promise(resolve => { finish = resolve; });
+  });
+  const pending = p.clear();
+  await p.clear();
+  assert.equal(calls, 1);
+  assert.equal(p.nodes['clear-character-image'].textContent, '清空中…');
+  finish({ ok: true, json: async () => ({ cleared: true }) });
+  await pending;
+  assert.equal(p.reloads(), 1);
+  const failure = page(async () => ({ ok: false, json: async () => ({ error: '清空失败' }) }));
+  await failure.clear();
+  assert.equal(failure.nodes['character-board-image'].src, '/old-image');
+  assert.equal(failure.nodes['clear-character-image'].disabled, false);
 });
 
 test('生成失败保留预览，网络失败警告不要直接重复付费；保存失败时在角色板展示可取回的图片', async () => {

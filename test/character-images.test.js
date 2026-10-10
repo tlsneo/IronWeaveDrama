@@ -54,7 +54,14 @@ async function fixture(t, filename = ':memory:') {
     if (request.url === '/image.png') { response.writeHead(200, { 'Content-Type': 'image/png' }); response.end(bytes); return; }
     const chunks = [];
     for await (const chunk of request) chunks.push(chunk);
-    requests.push({ path: request.url, authorization: request.headers.authorization, body: JSON.parse(Buffer.concat(chunks).toString()) });
+    const raw = Buffer.concat(chunks);
+    let body;
+    if (request.headers['content-type'].startsWith('multipart/form-data')) {
+      const form = await new Response(raw, { headers: { 'Content-Type': request.headers['content-type'] } }).formData();
+      body = Object.fromEntries(form);
+      body.image = Buffer.from(await form.get('image').arrayBuffer());
+    } else body = JSON.parse(raw.toString());
+    requests.push({ path: request.url, authorization: request.headers.authorization, body });
     if (wait) { started(); await wait; }
     response.writeHead(failed ? 500 : 200, { 'Content-Type': 'application/json' });
     response.end(JSON.stringify(failed ? { error: { message: 'failure test-private-key' } } : { data: [useUrl ? { url: `${provider.url}/image.png` } : { b64_json: bytes.toString('base64') }] }));
@@ -184,6 +191,81 @@ test('URL 结果下载到本地不携带密钥；拒绝未配置内网图片，�
   await assert.rejects(() => loadImage(redirect.url + '/image', redirect.url), /图片下载失败/);
 });
 
+test('AI修图使用当前预览图与所填要求，multipart 调用编辑配置；空要求和过期图片先拒绝，失败保留原图', async t => {
+  const f = await fixture(t);
+  const original = await (await f.post(f.fields())).json();
+  f.database.prepare('INSERT INTO api_configs (id, name, type, base_url, api_key, model) VALUES (2, ?, ?, ?, ?, ?)').run('修图接口', 'image_edit', f.fields().baseUrl, 'edit-key', 'edit-model');
+  const boardId = original.imageUrl.split('/').pop();
+  const fields = { ...f.fields(), apiConfigId: '2', model: 'edit-model', boardId, instruction: '把头发改为黑色，其他保持不变' };
+  const path = '/projects/1/characters/1/edit-image';
+  assert.equal((await f.post({ ...fields, instruction: '' }, path)).status, 400);
+  assert.equal((await f.post({ ...fields, instruction: 'x'.repeat(2001) }, path)).status, 400);
+  assert.equal((await f.post({ ...fields, boardId: '99999' }, path)).status, 409);
+  assert.equal((await f.post({ ...fields, apiConfigId: '1', model: 'actual-image-model' }, path)).status, 400);
+  assert.equal((await f.post(fields, '/projects/2/characters/1/edit-image')).status, 404);
+  assert.equal(f.requests.length, 1);
+  const response = await f.post(fields, path);
+  assert.equal(response.status, 200);
+  const result = await response.json();
+  assert.equal(result.valid, true);
+  assert.notEqual(result.imageUrl, original.imageUrl);
+  const request = f.requests.at(-1);
+  assert.equal(request.path, '/v1/images/edits');
+  assert.equal(request.authorization, 'Bearer edit-key');
+  assert.equal(request.body.model, 'edit-model');
+  assert.equal(request.body.n, '1');
+  assert.equal(request.body.size, '2560x1440');
+  assert.match(request.body.prompt, /把头发改为黑色，其他保持不变/);
+  assert.ok(request.body.prompt.replaceAll('\r\n', '\n').endsWith(baseCharacterBoard.prompt));
+  assert.deepEqual(request.body.image, png());
+  f.fail();
+  const failure = await f.post({ ...fields, boardId: result.imageUrl.split('/').pop() }, path);
+  assert.equal(failure.status, 502);
+  const html = await (await fetch(f.url + '/projects/1?resource=characters&character=1')).text();
+  assert.ok(html.includes(`src="${result.imageUrl}"`));
+  assert.equal(f.database.prepare('SELECT count(*) AS count FROM character_boards').get().count, 2);
+});
+
+test('清空图像不调用模型、不删除付费图片及角色资料，清空后列表和预览为空；新生图恢复显示，旧页面不能清新图片', async t => {
+  const f = await fixture(t);
+  const original = await (await f.post(f.fields())).json();
+  const boardId = original.imageUrl.split('/').pop();
+  const before = f.database.prepare('SELECT * FROM characters').get();
+  const path = '/projects/1/characters/1/clear-image';
+  assert.equal((await f.post({ boardId }, '/projects/2/characters/1/clear-image')).status, 404);
+  assert.equal((await f.post({ boardId: '0' }, path)).status, 409);
+  assert.equal((await f.post({ boardId }, path, { headers: { Origin: 'https://other.test' } })).status, 403);
+  const response = await f.post({ boardId }, path);
+  assert.equal(response.status, 200);
+  assert.equal((await response.json()).cleared, true);
+  assert.equal(f.requests.length, 1);
+  assert.deepEqual(f.database.prepare('SELECT * FROM characters').get(), before);
+  assert.equal(f.database.prepare('SELECT cleared FROM character_boards').get().cleared, 1);
+  assert.equal((await fetch(f.url + original.imageUrl)).status, 200);
+  let html = await (await fetch(f.url + '/projects/1?resource=characters&character=1')).text();
+  assert.doesNotMatch(html, /src="\/projects\//);
+  assert.match(html, /id="edit-character-image"[^>]*disabled/);
+  assert.match(await (await fetch(f.url + '/projects/1?resource=characters')).text(), /未生成角色板/);
+  assert.equal((await f.post({ boardId }, path)).status, 400);
+  const next = await (await f.post(f.fields())).json();
+  assert.equal((await f.post({ boardId }, path)).status, 409);
+  html = await (await fetch(f.url + '/projects/1?resource=characters&character=1')).text();
+  assert.ok(html.includes(`src="${next.imageUrl}"`));
+});
+
+test('修图或生图期间禁止清空，避免结果回写覆盖用户动作', async t => {
+  const f = await fixture(t);
+  const original = await (await f.post(f.fields())).json();
+  const started = f.pause();
+  const pending = f.post(f.fields());
+  await started;
+  const response = await f.post({ boardId: original.imageUrl.split('/').pop() }, '/projects/1/characters/1/clear-image');
+  assert.equal(response.status, 409);
+  f.resume();
+  assert.equal((await pending).status, 200);
+  assert.equal(f.database.prepare('SELECT count(*) AS count FROM character_boards WHERE cleared = 1').get().count, 0);
+});
+
 test('图片识别支持 PNG、JPEG、WebP 三种尺寸头，拒绝空图片及不安全尺寸', () => {
   assert.deepEqual(imageDetails(png()), { mime: 'image/png', width: 16, height: 9 });
   const jpeg = Buffer.from([255, 216, 255, 192, 0, 11, 8, 0, 9, 0, 16, 1, 1, 17, 0, 255, 217]);
@@ -216,6 +298,35 @@ test('角色板在重启后保留；保存结果失败时可取回付费图片�
   } finally { reopened?.close(); await rm(directory, { recursive: true, force: true }); }
 });
 
+test('版本 7 升级保留旧图片，默认不清空；升级失败回滚，清空标记重启后保留', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'ironweave-clear-migrate-'));
+  const filename = join(directory, 'drama.sqlite');
+  let database;
+  try {
+    database = openDatabase(filename);
+    database.exec("INSERT INTO projects VALUES (1, '原项目', '写实', '9:16'); INSERT INTO characters (id, project_id, name, age) VALUES (1, 1, '原角色', 28); ALTER TABLE character_boards DROP COLUMN cleared; PRAGMA user_version = 7;");
+    database.prepare('INSERT INTO character_boards (character_id, image, mime, width, height, valid, revision, model, prompt) VALUES (1, ?, ?, 16, 9, 1, ?, ?, ?)').run(png(), 'image/png', 'old-revision', 'old-model', 'old-prompt');
+    const original = database.prepare('SELECT * FROM character_boards').get();
+    database.close();
+    const exec = DatabaseSync.prototype.exec;
+    t.mock.method(DatabaseSync.prototype, 'exec', function (sql) { const result = exec.call(this, sql); if (sql.includes('PRAGMA user_version = 8')) throw new Error('clear migration failure'); return result; });
+    assert.throws(() => openDatabase(filename), /clear migration failure/);
+    t.mock.restoreAll();
+    database = new DatabaseSync(filename);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 7);
+    assert.deepEqual(database.prepare('SELECT * FROM character_boards').get(), original);
+    database.close();
+    database = openDatabase(filename);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 8);
+    assert.deepEqual({ ...database.prepare('SELECT * FROM character_boards').get() }, { ...original, cleared: 0 });
+    database.exec('UPDATE character_boards SET cleared = 1');
+    database.close();
+    database = openDatabase(filename);
+    assert.equal(database.prepare('SELECT cleared FROM character_boards').get().cleared, 1);
+    assert.equal(database.prepare('SELECT name FROM characters').get().name, '原角色');
+  } finally { t.mock.restoreAll(); database?.close(); await rm(directory, { recursive: true, force: true }); }
+});
+
 test('版本 6 升级保留所有项目、角色和 API；迁移失败完整回滚，重复打开不丢图片', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'ironweave-board-migrate-'));
   const filename = join(directory, 'drama.sqlite');
@@ -234,7 +345,7 @@ test('版本 6 升级保留所有项目、角色和 API；迁移失败完整回�
     assert.equal(database.prepare("SELECT name FROM sqlite_master WHERE name = 'character_boards'").get(), undefined);
     database.close();
     database = openDatabase(filename);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 7);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 8);
     assert.deepEqual(['projects', 'characters', 'api_configs'].map(table => database.prepare(`SELECT * FROM ${table}`).all()), original);
     assert.equal(database.prepare('SELECT count(*) AS count FROM character_boards').get().count, 0);
   } finally { t.mock.restoreAll(); database?.close(); await rm(directory, { recursive: true, force: true }); }
