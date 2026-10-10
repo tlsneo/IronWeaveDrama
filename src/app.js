@@ -1,15 +1,19 @@
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 
-const template = await readFile(new URL('../views/index.html', import.meta.url), 'utf8');
-const emptyLibrary = await readFile(new URL('../views/library-empty.html', import.meta.url), 'utf8');
+const resourceTypes = new Map([
+  ['characters', { name: '角色', description: '管理这部短剧的基础角色与参考图' }],
+  ['scenes', { name: '场景', description: '管理这部短剧的拍摄环境与场景参考图' }],
+  ['props', { name: '道具', description: '管理这部短剧使用的物品与道具参考图' }],
+  ['costumes', { name: '服饰', description: '服饰单独制作，与基础角色分开管理' }],
+]);
 const assets = new Map();
 for (const [path, type] of [
   ['/styles.css', 'text/css'],
   ['/theme.js', 'text/javascript'],
   ['/projects.js', 'text/javascript'],
 ]) {
-  assets.set(path, { type, body: await readFile(new URL(`../public${path}`, import.meta.url)) });
+  assets.set(path, { type, file: new URL(`../public${path}`, import.meta.url) });
 }
 
 function escapeHtml(value) {
@@ -18,22 +22,25 @@ function escapeHtml(value) {
   })[character]);
 }
 
-function renderLibrary(projects) {
-  if (!projects.length) return emptyLibrary;
+async function renderLibrary(projects) {
+  if (!projects.length) return readFile(new URL('../views/library-empty.html', import.meta.url), 'utf8');
   return `<section class="project-grid" aria-label="短剧项目">${projects.map(project => `
     <article class="project-card">
-      <div class="project-cover" aria-hidden="true"><span>${escapeHtml([...project.name][0])}</span></div>
-      <div class="project-details">
-        <p class="project-kind">整部短剧</p>
-        <h2>${escapeHtml(project.name)}</h2>
-        <div class="project-meta"><span>${escapeHtml(project.style)}</span><span>${escapeHtml(project.aspectRatio)}</span></div>
-      </div>
+      <a class="project-link" href="/projects/${project.id}">
+        <div class="project-cover" aria-hidden="true"><span>${escapeHtml([...project.name][0])}</span></div>
+        <div class="project-details">
+          <p class="project-kind">整部短剧</p>
+          <h2>${escapeHtml(project.name)}</h2>
+          <div class="project-meta"><span>${escapeHtml(project.style)}</span><span>${escapeHtml(project.aspectRatio)}</span></div>
+        </div>
+      </a>
     </article>`).join('')}</section>`;
 }
 
 export function createApp(database) {
   const listProjects = database.prepare('SELECT id, name, style, aspect_ratio AS aspectRatio FROM projects ORDER BY id DESC');
   const insertProject = database.prepare('INSERT INTO projects (name, style, aspect_ratio) VALUES (?, ?, ?)');
+  const findProject = database.prepare('SELECT name, style, aspect_ratio AS aspectRatio FROM projects WHERE id = ?');
   const server = createServer(async (request, response) => {
     function send(status, type, body, headers = {}) {
       response.writeHead(status, {
@@ -93,11 +100,39 @@ export function createApp(database) {
         return;
       }
       if (path === '/') {
-        send(200, 'text/html', template.replace('<!-- PROJECT_LIBRARY -->', () => renderLibrary(listProjects.all())));
+        const template = await readFile(new URL('../views/index.html', import.meta.url), 'utf8');
+        const library = await renderLibrary(listProjects.all());
+        send(200, 'text/html', template.replace('<!-- PROJECT_LIBRARY -->', () => library));
+        return;
+      }
+      const projectRoute = path.match(/^\/projects\/([1-9]\d*)$/);
+      if (projectRoute) {
+        const id = Number(projectRoute[1]);
+        const project = Number.isSafeInteger(id) ? findProject.get(id) : undefined;
+        if (!project) {
+          send(404, 'text/plain', '短剧项目不存在');
+          return;
+        }
+        const query = new URL(request.url, 'http://localhost').searchParams;
+        const resourceType = query.get('resource') ?? 'characters';
+        const resource = resourceTypes.get(resourceType);
+        if (!resource) {
+          send(404, 'text/plain', '资源分类不存在');
+          return;
+        }
+        const projectTemplate = await readFile(new URL('../views/project.html', import.meta.url), 'utf8');
+        const html = projectTemplate
+          .replaceAll('<!-- PROJECT_NAME -->', () => escapeHtml(project.name))
+          .replaceAll('<!-- PROJECT_STYLE -->', () => escapeHtml(project.style))
+          .replaceAll('<!-- PROJECT_ASPECT_RATIO -->', () => escapeHtml(project.aspectRatio))
+          .replaceAll('<!-- RESOURCE_NAME -->', () => resource.name)
+          .replaceAll('<!-- RESOURCE_DESCRIPTION -->', () => resource.description)
+          .replaceAll(/<!-- (CHARACTERS|SCENES|PROPS|COSTUMES)_CURRENT -->/g, (_match, type) => type.toLowerCase() === resourceType ? 'page' : 'false');
+        send(200, 'text/html', html);
         return;
       }
       const asset = assets.get(path);
-      send(asset ? 200 : 404, asset?.type ?? 'text/plain', asset?.body ?? '页面不存在');
+      send(asset ? 200 : 404, asset?.type ?? 'text/plain', asset ? await readFile(asset.file) : '页面不存在');
     } catch (error) {
       console.error('处理请求失败：', error);
       if (!response.headersSent) json(500, { error: '暂时无法完成操作，请稍后重试。' });
