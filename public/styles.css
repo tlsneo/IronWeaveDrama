@@ -80,6 +80,7 @@ h2 { margin: 0; font-size: 23px; font-weight: 600; line-height: 1.5; }
 .studio-layout { display: grid; grid-template-columns: 208px minmax(0, 1fr); min-height: calc(100dvh - 80px); }
 .studio-sidebar { display: flex; flex-direction: column; padding: 32px 16px 24px; background: #fff; border-right: 1px solid #e4e8e2; }
 .resource-navigation { width: 100%; }
+.creation-navigation { margin-bottom: 20px; }
 .resource-navigation summary { display: flex; align-items: center; justify-content: space-between; padding: 8px 12px; border-radius: 8px; color: #3f5845; font-size: 13px; font-weight: 600; cursor: pointer; list-style: none; }
 .resource-navigation summary::-webkit-details-marker { display: none; }
 .resource-navigation summary::after { content: ''; width: 6px; height: 6px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); }
@@ -99,6 +100,38 @@ h2 { margin: 0; font-size: 23px; font-weight: 600; line-height: 1.5; }
 .character-symbol { display: grid; place-items: center; width: 76px; height: 76px; margin-bottom: 20px; border: 1px solid #dce6dc; border-radius: 22px; background: #edf3ec; color: #5b7962; }
 .studio-empty h3 { margin: 0; font-size: 17px; font-weight: 600; }
 .studio-empty p { margin: 10px 0 0; color: #68716a; font-size: 13px; line-height: 1.8; }
+
+.seasons-list { display: grid; gap: 20px; }
+.season-panel, .script-season, .creation-panel { border: 1px solid #e0e5dd; border-radius: 12px; background: #fff; overflow: hidden; }
+.season-panel > summary { display: flex; align-items: center; gap: 14px; padding: 22px 24px; cursor: pointer; list-style: none; }
+.season-panel > summary::-webkit-details-marker { display: none; }
+.season-panel > summary::after { content: ''; width: 7px; height: 7px; border: solid currentColor; border-width: 0 1.5px 1.5px 0; transform: rotate(-45deg); flex-shrink: 0; }
+.season-panel[open] > summary::after { transform: rotate(45deg); }
+.season-number { padding: 5px 8px; border-radius: 6px; background: #edf3ec; color: #285448; font-size: 12px; font-weight: 600; }
+.season-name { min-width: 0; flex: 1; font-size: 16px; font-weight: 600; overflow-wrap: anywhere; }
+.season-count { color: #68716a; font-size: 12px; flex-shrink: 0; }
+.season-body { padding: 0 24px 24px; }
+.season-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 0; border-top: 1px solid #e4e8e2; }
+.item-actions, .order-controls { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+.item-actions .theme-toggle { min-height: 34px; padding: 6px 10px; font-size: 12px; }
+.order-button { min-width: 34px; min-height: 34px; border: 1px solid #cbd5cd; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
+.order-button:disabled { cursor: default; opacity: .35; }
+.episode-list { list-style: none; margin: 0; padding: 0; }
+.episode-row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 0; border-top: 1px solid #e4e8e2; }
+.episode-link { display: flex; align-items: center; gap: 16px; min-width: 0; text-decoration: none; font-size: 14px; }
+.episode-link:hover, .script-links a:hover { color: #285448; }
+.episode-link span:last-child { overflow-wrap: anywhere; }
+.episode-number { color: #68716a; font-size: 12px; flex-shrink: 0; }
+.season-empty { margin: 14px 0; color: #68716a; font-size: 13px; line-height: 1.8; }
+.script-season { margin-bottom: 20px; padding: 24px; }
+.script-season h3, .creation-panel h3 { margin: 0; font-size: 16px; font-weight: 600; }
+.script-links { list-style: none; padding: 0; margin: 16px 0 0; }
+.script-links a { display: flex; justify-content: space-between; gap: 16px; padding: 14px 0; border-top: 1px solid #e4e8e2; text-decoration: none; overflow-wrap: anywhere; font-size: 14px; }
+.script-links span { color: #68716a; flex-shrink: 0; font-size: 12px; }
+.episode-back { display: inline-block; margin: 0 0 20px; font-size: 13px; text-decoration: none; color: #3f5845; overflow-wrap: anywhere; }
+.episode-workspace { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+.creation-panel { padding: 24px; min-height: 240px; }
+.creation-panel p { margin: 20px 0 0; color: #68716a; font-size: 13px; }
 
 .project-dialog { width: min(480px, calc(100% - 40px)); max-height: calc(100% - 40px); padding: 32px; border: 1px solid #e0e5dd; border-radius: 16px; background: #fff; color: inherit; box-shadow: 0 24px 80px #0003; }
 .project-dialog::backdrop { background: #101a1699; }
@@ -131,6 +164,11 @@ h2 { margin: 0; font-size: 23px; font-weight: 600; line-height: 1.5; }
 :root[data-theme="dark"] .project-summary dd { background: #253229; border-color: #35433a; color: #bfd8c5; }
 :root[data-theme="dark"] :is(.resource-nav-item[aria-current="page"], .character-symbol) { background: #28382f; border-color: #425647; color: #bfd8c5; }
 :root[data-theme="dark"] .studio-empty { background: #19231d; border-color: #425647; }
+:root[data-theme="dark"] :is(.season-panel, .script-season, .creation-panel) { background: #1d2822; border-color: #35433a; }
+:root[data-theme="dark"] :is(.season-toolbar, .episode-row, .script-links a, .order-button) { border-color: #35433a; }
+:root[data-theme="dark"] .season-number { background: #28382f; color: #bfd8c5; }
+:root[data-theme="dark"] :is(.season-count, .episode-number, .season-empty, .script-links span, .creation-panel p) { color: #a6b3aa; }
+:root[data-theme="dark"] :is(.episode-back, .episode-link:hover, .script-links a:hover) { color: #bfd8c5; }
 :root[data-theme="dark"] .project-meta span:last-child { background: #28382f; color: #bfd8c5; }
 :root[data-theme="dark"] :is(.form-field input, .form-field select) { background: #253229; border-color: #425647; }
 :root[data-theme="dark"] .form-field input::placeholder { color: #a6b3aa; }
@@ -146,13 +184,21 @@ h2 { margin: 0; font-size: 23px; font-weight: 600; line-height: 1.5; }
   .studio-header .theme-toggle { margin-left: auto; }
   .studio-project { order: 1; flex-basis: 100%; padding: 16px 0 0; border-left: 0; border-top: 1px solid #e4e8e2; }
   .studio-layout { grid-template-columns: minmax(0, 1fr); }
-  .studio-sidebar { flex-direction: row; align-items: center; gap: 20px; padding: 12px 20px; border-right: 0; border-bottom: 1px solid #e4e8e2; }
+  .studio-sidebar { padding: 12px 20px; border-right: 0; border-bottom: 1px solid #e4e8e2; }
+  .creation-navigation { margin-bottom: 12px; }
   .resource-navigation nav { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px 8px; }
   .resource-group-label { grid-column: 1 / -1; margin-top: 12px; }
   .resource-nav-item { margin-top: 0; padding: 8px 12px; }
   .sidebar-brand { display: none; }
   .studio-main { padding: 28px 20px; }
   .studio-empty { min-height: 320px; }
+  .studio-section-heading { flex-wrap: wrap; }
+  .season-panel > summary { padding: 18px; }
+  .season-body { padding: 0 18px 18px; }
+  .episode-row { flex-wrap: wrap; gap: 12px; }
+  .episode-link { flex: 1 1 100%; }
+  .episode-workspace { grid-template-columns: minmax(0, 1fr); }
+  .script-links a { flex-wrap: wrap; }
 }
 
 @media (max-width: 640px) {

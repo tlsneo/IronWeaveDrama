@@ -59,7 +59,9 @@ test('项目卡片进入对应创作页，可直接访问或刷新，项目资�
     assert.ok(html.includes(`<dd>${project.style}</dd>`));
     assert.ok(html.includes(`<dd>${project.aspectRatio}</dd>`));
     assert.match(html, /资源库/);
-    assert.match(html, /还没有角色资源/);
+    assert.match(html, /<summary>创作<\/summary>/);
+    assert.match(html, /分季／分集管理/);
+    assert.match(html, /第一季/);
     assert.match(html, /class="studio-header"/);
     assert.match(html, /class="studio-sidebar"/);
     assert.match(html, /class="studio-main"/);

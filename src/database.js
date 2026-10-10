@@ -1,7 +1,20 @@
 import { DatabaseSync } from 'node:sqlite';
 
+export function inTransaction(database, action) {
+  database.exec('BEGIN IMMEDIATE');
+  try {
+    const result = action();
+    database.exec('COMMIT');
+    return result;
+  } catch (error) {
+    database.exec('ROLLBACK');
+    throw error;
+  }
+}
+
 export function openDatabase(filename) {
   const database = new DatabaseSync(filename);
+  database.exec('PRAGMA foreign_keys = ON');
   database.exec('BEGIN IMMEDIATE');
   try {
     if (database.prepare('PRAGMA user_version').get().user_version === 0) {
@@ -24,6 +37,26 @@ export function openDatabase(filename) {
         `);
       }
       database.exec('PRAGMA user_version = 1');
+    }
+    if (database.prepare('PRAGMA user_version').get().user_version < 2) {
+      database.exec(`
+        CREATE TABLE seasons (
+          id INTEGER PRIMARY KEY,
+          project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          position INTEGER NOT NULL CHECK (position > 0)
+        );
+        CREATE INDEX seasons_project_order ON seasons (project_id, position);
+        CREATE TABLE episodes (
+          id INTEGER PRIMARY KEY,
+          season_id INTEGER NOT NULL REFERENCES seasons(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          position INTEGER NOT NULL CHECK (position > 0)
+        );
+        CREATE INDEX episodes_season_order ON episodes (season_id, position);
+        INSERT INTO seasons (project_id, name, position) SELECT id, '第一季', 1 FROM projects;
+        PRAGMA user_version = 2;
+      `);
     }
     database.exec('COMMIT');
     return database;
