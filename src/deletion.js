@@ -12,9 +12,9 @@ export function deleteItem(database, kind, id, projectId, form) {
     if (kind === 'projects') {
       item = database.prepare('SELECT name FROM projects WHERE id = ?').get(id);
       redirect = '/';
-    } else if (kind === 'characters' || kind === 'seasons') {
+    } else if (kind === 'characters' || kind === 'scenes' || kind === 'seasons') {
       item = database.prepare(`SELECT name FROM ${kind} WHERE id = ? AND project_id = ?`).get(id, projectId);
-      redirect = `/projects/${projectId}?${kind === 'characters' ? 'resource=characters' : 'view=seasons'}`;
+      redirect = `/projects/${projectId}?${kind === 'seasons' ? 'view=seasons' : `resource=${kind}`}`;
     } else if (kind === 'episodes') {
       item = database.prepare('SELECT e.name, e.season_id FROM episodes e JOIN seasons s ON s.id = e.season_id WHERE e.id = ? AND s.project_id = ?').get(id, projectId);
       redirect = `/projects/${projectId}?view=seasons&season=${item?.season_id}`;

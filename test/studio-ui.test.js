@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm';
 
 const script = await readFile(new URL('../public/studio.js', import.meta.url), 'utf8');
 
-function page(fetch, characterValues) {
+function page(fetch, characterValues, resource = 'character') {
   const events = {};
   const name = { value: '', select() {} };
   const season = { value: '' };
@@ -28,12 +28,12 @@ function page(fetch, characterValues) {
   const characterButton = { disabled: false, textContent: '保存资料' };
   const characterError = { textContent: '' };
   if (characterValues) {
-    nodes['character-form'] = {
-      dataset: { url: '/projects/1/characters/2' },
+    nodes[`${resource}-form`] = {
+      dataset: { url: `/projects/1/${resource}s/2` },
       querySelector: () => characterButton,
       addEventListener: (event, handler) => { events[`character${event}`] = handler; },
     };
-    nodes['character-error'] = characterError;
+    nodes[`${resource}-error`] = characterError;
   }
   const redirects = [];
   runInNewContext(script, {
@@ -42,7 +42,7 @@ function page(fetch, characterValues) {
       addEventListener: (event, handler) => { events.click = handler; },
     },
     window: { location: { assign: url => redirects.push(url) }, addEventListener: (event, handler) => { events[event] = handler; } },
-    FormData: class { constructor(target) { return new URLSearchParams(target === nodes['character-form'] ? characterValues : { name: name.value, seasonId: season.value }); } },
+    FormData: class { constructor(target) { return new URLSearchParams(target === nodes[`${resource}-form`] ? characterValues : { name: name.value, seasonId: season.value }); } },
     URLSearchParams, TypeError, Error, fetch,
   });
   return {
@@ -167,6 +167,30 @@ test('角色编辑失败保留输入并允许重试，保存期间锁定表单�
   assert.equal(p.characterError.textContent, '');
   assert.equal(p.characterButton.textContent, '保存资料');
   assert.deepEqual(p.redirects, ['/projects/1?resource=characters&character=2']);
+});
+
+test('场景编辑复用资料保存交互，脏状态提醒、失败保留说明、阻止重复请求，成功清除提醒', async () => {
+  let finish, calls = 0;
+  const p = page((url, options) => {
+    calls++;
+    assert.equal(url, '/projects/1/scenes/2');
+    assert.equal(options.body.get('description'), '手工场景说明');
+    return new Promise(resolve => { finish = resolve; });
+  }, { name: '大厅', description: '' }, 'scene');
+  p.changeCharacter('description', '手工场景说明');
+  let prevented = false;
+  p.beforeUnload({ preventDefault() { prevented = true; } });
+  assert.equal(prevented, true);
+  const pending = p.submitCharacter(); await p.submitCharacter();
+  assert.equal(calls, 1); assert.equal(p.nodes['scene-form'].inert, true);
+  finish({ ok: false, json: async () => ({ error: '保存失败。' }) }); await pending;
+  assert.equal(p.characterValues.description, '手工场景说明');
+  assert.equal(p.characterError.textContent, '保存失败。');
+  assert.equal(p.nodes['scene-form'].dataset.dirty, 'true');
+  const retry = p.submitCharacter();
+  finish({ ok: true, json: async () => ({ redirect: '/projects/1?resource=scenes&scene=2' }) }); await retry;
+  assert.equal(p.nodes['scene-form'].dataset.dirty, '');
+  assert.deepEqual(p.redirects, ['/projects/1?resource=scenes&scene=2']);
 });
 
 test('角色未保存修改离开页面时提醒，保存成功后清除提醒再跳转', async () => {

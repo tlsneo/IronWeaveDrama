@@ -21,7 +21,15 @@ export function readEpisodeScript(database, episodeId) {
 }
 
 export function assertEpisodeScriptsIdle(database, ids) {
-  if (ids.some(id => generating.get(database)?.has(id))) reject(409, '本集正在生成剧本，请等待完成后再操作。');
+  if (ids.some(id => generating.get(database)?.has(id))) reject(409, '本集正在生成剧本或提取资源，请等待完成后再操作。');
+}
+
+export async function withEpisodeScriptLock(database, episodeId, action) {
+  assertEpisodeScriptsIdle(database, [episodeId]);
+  const active = generating.get(database) ?? new Set();
+  generating.set(database, active); active.add(episodeId);
+  try { return await action(); }
+  finally { active.delete(episodeId); }
 }
 
 function checkRevision(form, draft) {
@@ -41,6 +49,7 @@ export function saveEpisodeScript(database, projectId, episodeId, form) {
     fields[key] = form.get(key);
     if (fields[key].length > max || fields[key].includes('\0')) reject(400, `${{ source: '小说原文', script: '剧本正文', notes: '改编说明' }[key]}最多 ${max} 字，不允许空字符。`);
   }
+  if (draft.revision && Object.keys(limits).every(key => fields[key] === draft[key])) return { revision: draft.revision, message: '原文、剧本和改编说明已保存。' };
   const revision = draft.revision + 1;
   const result = draft.revision
     ? database.prepare('UPDATE episode_scripts SET source = ?, script = ?, notes = ?, revision = ? WHERE episode_id = ? AND revision = ?').run(fields.source, fields.script, fields.notes, revision, episodeId, draft.revision)
@@ -65,10 +74,7 @@ export async function generateEpisodeScript(database, projectId, episodeId, form
   const config = readApiConfig(database, configId);
   if (config.type !== 'llm' || !config.apiKey) reject(400, '请选择已保存密钥的大语言模型配置。');
   if (config.model !== form.get('model') || config.baseUrl !== form.get('baseUrl')) reject(409, 'API 配置已变化，请刷新后重新选择。');
-  assertEpisodeScriptsIdle(database, [episodeId]);
-  const active = generating.get(database) ?? new Set();
-  generating.set(database, active); active.add(episodeId);
-  try {
+  return withEpisodeScriptLock(database, episodeId, async () => {
     const response = await callModel(config, '/chat/completions', {
       model: config.model, stream: false, max_tokens: 8192,
       messages: [{ role: 'system', content: novelToScriptPrompt }, { role: 'user', content: JSON.stringify({ episodeNumber: episode.number, source: draft.source }) }],
@@ -93,5 +99,5 @@ export async function generateEpisodeScript(database, projectId, episodeId, form
       reject(502, '剧本已生成但未能保存，原剧本不变；请复制返回文本，避免丢失付费结果。', { recoveryText });
     }
     return { script: generated.script, notes: generated.notes, revision, message: '剧本已生成并保存，请对照原文检查。' };
-  } finally { active.delete(episodeId); }
+  });
 }

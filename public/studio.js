@@ -6,13 +6,14 @@ const formError = document.getElementById('name-error');
 const pageError = document.getElementById('studio-error');
 const saveButton = form.querySelector('[type="submit"]');
 const characterForm = document.getElementById('character-form');
+const resourceForm = characterForm ?? document.getElementById('scene-form');
 let moving = false;
 
 async function save(url, body) {
   const response = await fetch(url, { method: 'POST', body });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error ?? '保存失败，请重试。');
-  if (characterForm) characterForm.dataset.dirty = '';
+  if (resourceForm) resourceForm.dataset.dirty = '';
   window.location.assign(result.redirect);
 }
 
@@ -74,11 +75,11 @@ function bindSave(targetForm, button, errorElement, label) {
 }
 
 bindSave(form, saveButton, formError, '保存');
-if (characterForm) {
-  bindSave(characterForm, characterForm.querySelector('[type="submit"]'), document.getElementById('character-error'), '保存资料');
-  characterForm.addEventListener('input', () => { characterForm.dataset.dirty = 'true'; });
+if (resourceForm) {
+  bindSave(resourceForm, resourceForm.querySelector('[type="submit"]'), document.getElementById(characterForm ? 'character-error' : 'scene-error'), '保存资料');
+  resourceForm.addEventListener('input', () => { resourceForm.dataset.dirty = 'true'; });
   window.addEventListener('beforeunload', event => {
-    if (characterForm.dataset.dirty) {
+    if (resourceForm.dataset.dirty) {
       event.preventDefault();
       event.returnValue = '';
     }

@@ -193,6 +193,44 @@ export function openDatabase(filename) {
         PRAGMA user_version = 11;
       `);
     }
+    if (database.prepare('PRAGMA user_version').get().user_version < 12) {
+      database.exec(`
+        CREATE TABLE scenes (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT ''
+        );
+        CREATE INDEX scenes_project ON scenes (project_id, id);
+        CREATE TABLE episode_extractions (
+          episode_id INTEGER PRIMARY KEY REFERENCES episodes(id) ON DELETE CASCADE,
+          script_revision INTEGER NOT NULL CHECK (script_revision > 0),
+          revision INTEGER NOT NULL CHECK (revision > 0),
+          candidates TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE TABLE episode_occurrences (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          episode_id INTEGER NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL CHECK (kind IN ('character', 'scene')),
+          character_id INTEGER REFERENCES characters(id) ON DELETE SET NULL,
+          scene_id INTEGER REFERENCES scenes(id) ON DELETE SET NULL,
+          source_name TEXT NOT NULL,
+          scene_heading TEXT NOT NULL,
+          quote TEXT NOT NULL,
+          source_start INTEGER NOT NULL CHECK (source_start >= 0),
+          mode TEXT NOT NULL CHECK (mode IN ('on_screen', 'off_screen', 'inner_voice', 'memory', 'imagination', 'mentioned')),
+          details TEXT NOT NULL DEFAULT '',
+          script_revision INTEGER NOT NULL CHECK (script_revision > 0),
+          revision INTEGER NOT NULL DEFAULT 1 CHECK (revision > 0),
+          ignored INTEGER NOT NULL DEFAULT 0 CHECK (ignored IN (0, 1)),
+          CHECK ((kind = 'character' AND scene_id IS NULL) OR (kind = 'scene' AND character_id IS NULL)),
+          UNIQUE (episode_id, kind, source_name, quote)
+        );
+        CREATE INDEX occurrences_character ON episode_occurrences (character_id, episode_id);
+        CREATE INDEX occurrences_scene ON episode_occurrences (scene_id, episode_id);
+        PRAGMA user_version = 12;
+      `);
+    }
     if (database.prepare('PRAGMA foreign_key_check').all().length) throw new Error('数据库关系检查失败，升级已回滚。');
     database.exec('COMMIT');
     database.exec('PRAGMA foreign_keys = ON');

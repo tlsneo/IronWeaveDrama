@@ -1,5 +1,6 @@
 import { escapeHtml, deleteButton } from './html.js';
 import { readEpisodeScript } from './episode-scripts.js';
+import { renderEpisodeResources } from './render-episode-resources.js';
 
 function nameButton(url, label, name = '', seasonId = '') {
   return `<button class="theme-toggle" type="button" data-name-dialog data-url="${url}" data-title="${label}" data-name="${escapeHtml(name)}" data-season-id="${seasonId}">${label}</button>`;
@@ -107,7 +108,7 @@ export function renderCreation(database, projectId, view, query) {
           <div class="form-field"><label for="episode-script-text">剧本正文</label><textarea id="episode-script-text" name="script" maxlength="60000" rows="20">${escapeHtml(draft.script)}</textarea></div>
           <details class="episode-script-notes" ${draft.notes ? 'open' : ''}><summary>改编说明</summary><div class="form-field"><label class="visually-hidden" for="episode-script-notes">删并说明与原文疑点</label><textarea id="episode-script-notes" name="notes" maxlength="10000" rows="5">${escapeHtml(draft.notes)}</textarea></div></details>
         </form>
-        <section id="episode-script-recovery" class="episode-script-recovery" hidden aria-label="未保存的模型返回内容"><h4>返回内容未写入剧本，请先复制保留</h4><textarea id="episode-script-recovery-text" rows="10" readonly aria-label="可手动取回的模型文本"></textarea></section>
-      </section>`;
+        <section id="episode-script-recovery" class="episode-script-recovery" hidden aria-label="未保存的模型返回内容"><h4>返回内容未保存，请先复制保留</h4><textarea id="episode-script-recovery-text" rows="10" readonly aria-label="可手动取回的模型文本"></textarea></section>
+      </section>${renderEpisodeResources(database, projectId, id, draft, configs)}`;
   return { title: episode.name, description: `${season.name} · 本集剧本`, actions, content };
 }

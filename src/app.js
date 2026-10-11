@@ -11,6 +11,8 @@ import { renderSettings } from './render-settings.js';
 import { generateCharacterBoard, clearCharacterBoard, saveCharacterReference, clearCharacterReference } from './character-images.js';
 import { deleteItem } from './deletion.js';
 import { saveEpisodeScript, generateEpisodeScript } from './episode-scripts.js';
+import { extractEpisodeResources, confirmEpisodeResources, updateEpisodeOccurrence } from './episode-resources.js';
+import { saveScene, renderScenes } from './scenes.js';
 
 const resourceTypes = new Map([
   ['characters', { name: '角色', description: '管理这部短剧的基础角色与参考图' }],
@@ -31,6 +33,7 @@ for (const [path, type] of [
   ['/image-mask.js', 'text/javascript'],
   ['/character-reference.js', 'text/javascript'],
   ['/episode-script.js', 'text/javascript'],
+  ['/episode-resources.js', 'text/javascript'],
 ]) {
   assets.set(path, { type, file: new URL(`../public${path}`, import.meta.url) });
 }
@@ -92,10 +95,12 @@ export function createApp(database) {
     }
     const json = (status, value) => send(status, 'application/json', JSON.stringify(value));
     const path = request.url.split('?')[0];
-    const deleteProjectRoute = path.match(/^\/projects\/([1-9]\d*)(?:\/(characters|seasons|episodes)\/([1-9]\d*))?\/delete$/);
+    const deleteProjectRoute = path.match(/^\/projects\/([1-9]\d*)(?:\/(characters|scenes|seasons|episodes)\/([1-9]\d*))?\/delete$/);
     const deleteConfigRoute = path.match(/^\/settings\/api\/([1-9]\d*)\/delete$/);
     const creationRoute = path.match(/^\/projects\/([1-9]\d*)\/(seasons|episodes)(?:\/([1-9]\d*)(\/move)?)?$/);
     const scriptRoute = path.match(/^\/projects\/([1-9]\d*)\/episodes\/([1-9]\d*)\/(script|generate-script)$/);
+    const extractionRoute = path.match(/^\/projects\/([1-9]\d*)\/episodes\/([1-9]\d*)\/(extract-resources|confirm-resources|resource-occurrences\/([1-9]\d*))$/);
+    const sceneRoute = path.match(/^\/projects\/([1-9]\d*)\/scenes(?:\/([1-9]\d*))?$/);
     const characterRoute = path.match(/^\/projects\/([1-9]\d*)\/characters(?:\/([1-9]\d*))?$/);
     const generationRoute = path.match(/^\/projects\/([1-9]\d*)\/characters\/([1-9]\d*)\/(generate|edit-image|clear-image)$/);
     const referenceRoute = path.match(/^\/projects\/([1-9]\d*)\/characters\/([1-9]\d*)\/(reference-image|clear-reference)$/);
@@ -110,6 +115,22 @@ export function createApp(database) {
         const projectId = deleteProjectRoute?.[2] ? Number(deleteProjectRoute[1]) : undefined;
         json(200, deleteItem(database, kind, id, projectId, form));
         return;
+      }
+      if (extractionRoute && request.method === 'POST') {
+        const [projectId, id] = extractionRoute.slice(1, 3).map(Number);
+        const occurrenceId = extractionRoute[4] ? Number(extractionRoute[4]) : undefined;
+        const form = await readForm(request, extractionRoute[3] === 'confirm-resources' ? 1024 * 1024 : 32768);
+        if (![projectId, id, ...(occurrenceId === undefined ? [] : [occurrenceId])].every(Number.isSafeInteger)) { json(404, { error: '集或出场记录不存在' }); return; }
+        json(200, extractionRoute[3] === 'extract-resources' ? await extractEpisodeResources(database, projectId, id, form)
+          : extractionRoute[3] === 'confirm-resources' ? confirmEpisodeResources(database, projectId, id, form)
+          : updateEpisodeOccurrence(database, projectId, id, occurrenceId, form));
+        return;
+      }
+      if (sceneRoute && request.method === 'POST') {
+        const projectId = Number(sceneRoute[1]); const id = sceneRoute[2] ? Number(sceneRoute[2]) : undefined;
+        const form = await readForm(request);
+        if (![projectId, ...(id === undefined ? [] : [id])].every(Number.isSafeInteger)) { json(404, { error: '场景不存在' }); return; }
+        json(id ? 200 : 201, saveScene(database, projectId, id, form)); return;
       }
       if (scriptRoute && request.method === 'POST') {
         const [projectId, id] = scriptRoute.slice(1).map(Number);
@@ -196,7 +217,7 @@ export function createApp(database) {
 
       if (request.method !== 'GET' && request.method !== 'HEAD') {
         request.resume();
-        send(405, 'text/plain', '暂不支持此操作', { Allow: path === '/projects' || creationRoute || scriptRoute || characterRoute || settingsRoute || generationRoute || referenceRoute || deleteProjectRoute || deleteConfigRoute ? 'POST' : 'GET, HEAD' });
+        send(405, 'text/plain', '暂不支持此操作', { Allow: path === '/projects' || creationRoute || scriptRoute || extractionRoute || sceneRoute || characterRoute || settingsRoute || generationRoute || referenceRoute || deleteProjectRoute || deleteConfigRoute ? 'POST' : 'GET, HEAD' });
         return;
       }
       if (path === '/') {
@@ -242,6 +263,8 @@ export function createApp(database) {
           }
           if (resourceType === 'characters') {
             workspace = await renderCharacters(database, id, project, query);
+          } else if (resourceType === 'scenes') {
+            workspace = renderScenes(database, id, query);
           } else {
             const content = await readFile(new URL('../views/resource-empty.html', import.meta.url), 'utf8');
             workspace = { title: resource.name, description: resource.description, actions: '', content: content.replaceAll('<!-- RESOURCE_NAME -->', resource.name) };

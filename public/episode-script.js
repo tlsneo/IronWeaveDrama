@@ -7,6 +7,7 @@
   const notes = document.getElementById('episode-script-notes');
   const api = document.getElementById('episode-script-api');
   const generate = document.getElementById('generate-episode-script');
+  const extract = document.getElementById('extract-episode-resources');
   const save = document.getElementById('save-episode-script');
   const errorElement = document.getElementById('episode-script-error');
   const status = document.getElementById('episode-script-status');
@@ -30,24 +31,37 @@
     form.dataset.dirty = '';
     return result;
   }
-  async function run(generating) {
-    const active = generating ? generate : save;
+  async function run(generating, extracting = false) {
+    const active = extracting ? extract : generating ? generate : save;
     if (busy || active.disabled || main.inert) return;
     errorElement.textContent = ''; status.textContent = '';
     let replacement = false;
-    if (generating) {
-      if (!source.value.trim()) { errorElement.textContent = '请填写本集小说原文。'; source.focus(); return; }
+    if (generating || extracting) {
+      const input = extracting ? script : source;
+      if (!input.value.trim()) { errorElement.textContent = extracting ? '请先填写并保存本集剧本正文。' : '请填写本集小说原文。'; input.focus(); return; }
       if (!api.value) { errorElement.textContent = '请选择大语言模型配置。'; api.focus(); return; }
-      replacement = !!(script.value.trim() || notes.value.trim());
-      if (replacement && !window.confirm('生成成功将替换当前剧本和改编说明。当前稿件会先保存，生成失败不会覆盖；是否继续？')) return;
+      if (generating) {
+        replacement = !!(script.value.trim() || notes.value.trim());
+        if (replacement && !window.confirm('生成成功将替换当前剧本和改编说明。当前稿件会先保存，生成失败不会覆盖；是否继续？')) return;
+      } else {
+        replacement = extract.dataset.hasCandidates === 'true';
+        if ((replacement || document.querySelector('#episode-resource-candidates[data-dirty="true"], [data-occurrence-form][data-dirty="true"]')) && !window.confirm('重新提取会替换未确认的提取草稿，并离开当前未保存的关联输入。已确认的出场记录和资源档案不会删除或覆盖；是否继续？')) return;
+      }
     }
     const label = active.textContent;
     busy = true; active.disabled = true; main.inert = true;
-    active.textContent = generating ? '生成中…' : '保存中…';
-    let modelRequested = false;
+    active.textContent = extracting ? '提取中…' : generating ? '生成中…' : '保存中…';
+    let modelRequested = false, redirect;
     try {
-      if (!generating || form.dataset.dirty || form.dataset.revision === '0') await saveDraft();
-      if (generating) {
+      if ((!generating && !extracting) || form.dataset.dirty || form.dataset.revision === '0') await saveDraft();
+      if (extracting) {
+        const option = api.selectedOptions[0]; modelRequested = true;
+        const result = await post(extract.dataset.url, new URLSearchParams({ revision: form.dataset.revision, batchRevision: extract.dataset.batchRevision,
+          apiConfigId: api.value, model: option.dataset.model, baseUrl: option.dataset.baseUrl, replaceConfirmed: replacement ? 'yes' : 'no' }));
+        document.querySelectorAll('#episode-resource-candidates, [data-occurrence-form]').forEach(target => { target.dataset.dirty = ''; });
+        status.textContent = result.message;
+        redirect = result.redirect;
+      } else if (generating) {
         const option = api.selectedOptions[0];
         modelRequested = true;
         const result = await post(form.dataset.generateUrl, new URLSearchParams({
@@ -68,10 +82,12 @@
     } finally {
       busy = false; main.inert = false; active.disabled = false; active.textContent = label;
     }
+    if (redirect) { window.location.hash = redirect.split('#')[1] ?? ''; window.location.reload(); }
   }
   form.addEventListener('submit', event => { event.preventDefault(); return run(false); });
   form.addEventListener('input', event => { if (event.target !== api) form.dataset.dirty = 'true'; });
   generate.addEventListener('click', () => run(true));
+  extract?.addEventListener('click', () => run(false, true));
   window.addEventListener('beforeunload', event => {
     if (busy || form.dataset.dirty || (!recovery.hidden && recoveryText.value)) { event.preventDefault(); event.returnValue = ''; }
   });

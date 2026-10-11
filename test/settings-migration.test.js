@@ -9,6 +9,9 @@ import { openDatabase } from '../src/database.js';
 function versionThree(filename) {
   const database = openDatabase(filename);
   database.exec(`
+    DROP TABLE episode_occurrences;
+    DROP TABLE episode_extractions;
+    DROP TABLE scenes;
     DROP TABLE episode_scripts;
     DROP TABLE character_boards;
     DROP TABLE character_references;
@@ -52,7 +55,7 @@ for (const version of [3, 4]) {
       const before = originals(database);
       database.close();
       database = openDatabase(filename);
-      assert.equal(database.prepare('PRAGMA user_version').get().user_version, 11);
+      assert.equal(database.prepare('PRAGMA user_version').get().user_version, 12);
       assert.deepEqual(originals(database), before);
       assert.equal(database.prepare('SELECT count(*) AS count FROM api_configs').get().count, version === 4 ? 1 : 0);
       if (version === 4) {
@@ -114,7 +117,7 @@ test('版本 5 的类型配置迁成具名卡片，保留地址、密钥、模�
     const configs = database.prepare('SELECT type, base_url, api_key, model, size FROM api_configs ORDER BY type').all();
     database.close();
     database = openDatabase(filename);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 11);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 12);
     assert.deepEqual(originals(database), before);
     assert.deepEqual(database.prepare('SELECT type, base_url, api_key, model, size FROM api_configs ORDER BY type').all(), configs);
     const rows = database.prepare('SELECT id, name FROM api_configs ORDER BY id').all();

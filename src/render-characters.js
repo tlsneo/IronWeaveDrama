@@ -3,6 +3,7 @@ import { characterFields, findCharacter } from './characters.js';
 import { escapeHtml, deleteButton } from './html.js';
 import { baseCharacterBoard } from '../prompts/character/base-board.js';
 import { characterRevision, characterBoardUrl, readCharacterReference } from './character-images.js';
+import { renderResourceAppearances } from './render-episode-resources.js';
 
 function renderField(field, character) {
   const value = escapeHtml(String(character[field.column] ?? ''));
@@ -63,6 +64,7 @@ export async function renderCharacters(database, projectId, project, query) {
         </form>
       </aside>
     </div>
+    ${renderResourceAppearances(database, projectId, 'character', id, query)}
     <dialog id="character-image-edit-dialog" class="project-dialog image-edit-dialog" aria-labelledby="image-edit-title">
       <div class="image-edit-heading"><h2 id="image-edit-title">AI修图</h2><button id="image-edit-close" class="theme-toggle" type="button">关闭</button></div>
       <p id="image-edit-error" class="form-error" role="alert"></p>

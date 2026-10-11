@@ -18,10 +18,11 @@
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? '删除失败。');
-      const characterForm = document.getElementById('character-form');
-      if (characterForm) characterForm.dataset.dirty = '';
-      const scriptForm = document.getElementById('episode-script-form');
-      if (scriptForm) scriptForm.dataset.dirty = '';
+      for (const id of ['character-form', 'scene-form', 'episode-script-form', 'episode-resource-candidates']) {
+        const form = document.getElementById(id);
+        if (form) form.dataset.dirty = '';
+      }
+      document.querySelectorAll('[data-occurrence-form]').forEach(form => { form.dataset.dirty = ''; });
       const scriptRecovery = document.getElementById('episode-script-recovery');
       if (scriptRecovery) scriptRecovery.hidden = true;
       busy = false;

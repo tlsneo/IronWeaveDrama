@@ -220,7 +220,7 @@ test('版本 10 升级保留所有现有资料，新增空剧本表；失败回�
   const snapshot = db => tables.map(table => db.prepare(`SELECT * FROM ${table}`).all());
   try {
     database = openDatabase(filename);
-    database.exec("DROP TABLE episode_scripts; PRAGMA user_version = 10; INSERT INTO projects VALUES (1, '原项目', '写实', '9:16'); INSERT INTO seasons VALUES (1, 1, '原季', 1); INSERT INTO episodes VALUES (1, 1, '原集', 1)");
+    database.exec("DROP TABLE episode_occurrences; DROP TABLE episode_extractions; DROP TABLE scenes; DROP TABLE episode_scripts; PRAGMA user_version = 10; INSERT INTO projects VALUES (1, '原项目', '写实', '9:16'); INSERT INTO seasons VALUES (1, 1, '原季', 1); INSERT INTO episodes VALUES (1, 1, '原集', 1)");
     const original = snapshot(database); database.close();
     const exec = DatabaseSync.prototype.exec;
     t.mock.method(DatabaseSync.prototype, 'exec', function (sql) { const result = exec.call(this, sql); if (sql.includes('PRAGMA user_version = 11')) throw new Error('script migration failure'); return result; });
@@ -228,7 +228,7 @@ test('版本 10 升级保留所有现有资料，新增空剧本表；失败回�
     database = new DatabaseSync(filename); assert.equal(database.prepare('PRAGMA user_version').get().user_version, 10);
     assert.deepEqual(snapshot(database), original); assert.equal(database.prepare("SELECT name FROM sqlite_master WHERE name = 'episode_scripts'").get(), undefined);
     database.close(); database = openDatabase(filename);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 11); assert.deepEqual(snapshot(database), original);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 12); assert.deepEqual(snapshot(database), original);
     database.exec("INSERT INTO episode_scripts (episode_id, source, script, notes, revision) VALUES (1, '原文', '剧本', '说明', 1)");
     database.close(); database = openDatabase(filename); assert.equal(database.prepare('SELECT script FROM episode_scripts').get().script, '剧本');
     assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), []);
