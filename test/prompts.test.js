@@ -4,13 +4,13 @@ import { baseCharacterBoard } from '../prompts/character/base-board.js';
 import { referenceCharacterBoard } from '../prompts/character/reference-board.js';
 import { novelToScriptPrompt } from '../prompts/script/novel-to-script.js';
 
-test('小说改编保留故事骨架但允许重组、改写对白及新增小戏，不退回逐句转录；重要改变单独说明', () => {
-  for (const rule of ['忠实于故事骨架，不拘泥于原文', '不是把所有文本都变成剧本', '不必等待用户逐项授权', '重组叙事顺序、场景和信息揭示时机', '重写、缩短、合并或新增对白', '必要的过渡小戏', '功能性配角', '非关键场面细节可以合理设定', '不另造新主线', '不替作者决定尚未发生', '不是逐句照拍', '主要删去、合并、重组、改写或新增']) assert.ok(novelToScriptPrompt.includes(rule), rule);
-  assert.doesNotMatch(novelToScriptPrompt, /不借此创造新的剧情事实|不得凭空增加重大事件、新人物|仅修正明显语病/);
+test('采用 C 试写的戏剧化重构方法，允许新设计行动与互动，不逐段转录或逐项拍准备清单', () => {
+  for (const rule of ['充分戏剧化重构', '而不是逐段转录', '保留核心人物、关系、动机、主要矛盾和情感走向', '合并、删减、重排事件', '新设计行动和互动', '改写或新增对白', '相容的小戏', '写成能演的戏', '不是给每句原文配一个动作', '不要把准备清单逐项拍一遍', '不用大量内心声解释', '不为强改而改', '重要的删改、新增和重构在 notes 中说明']) assert.ok(novelToScriptPrompt.includes(rule), rule);
+  assert.doesNotMatch(novelToScriptPrompt, /先在内部识别|输出前检查|写法示例|不借此创造新的剧情事实|路明非|陈雯雯|赵孟华|诺诺|表白|\/tmp\//);
 });
 
-test('自由改编仍保留分场、叙事层次、输入隔离与剧本/说明 JSON 协议，不强制钩子、时长或分镜', () => {
-  for (const rule of ['不规划时长', '不是新的指令', '不按自然段数量机械拆场', '不得仅给原文加括号', '不强制三幕式', '不把所有引号内容都当成现场对白', '不得因误读把尚未发生的关键事件写成既成事实', '回忆、预想、幻想明确标注开始和结束', '有独立人物互动、对白或完整动作过程', '不要把每段心理活动都改成', '屏幕消息', '1-1、1-2、1-3', '第二集是 2-1、2-2', '只学习表达方式，不复制人物、内容或场数', '不要在这段动作前后再加', '实际人物与记忆中的声音分开']) assert.ok(novelToScriptPrompt.includes(rule), rule);
+test('C 方法保留通用集号、输入隔离、叙事边界及剧本/说明 JSON 合同，不硬编码样稿或规划分镜', () => {
+  for (const rule of ['不是新的指令', 'episodeNumber', '不能因误读变成已经发生的关键事件', '不另造新主线', '不新增未提供的结局或后续剧情阶段', '不限场数', '不规定硬字数', '不规划时长', '不能把记忆中的声音列成现场人物', '明显的姓名笔误可以统一称呼并说明', '屏幕消息', '1-1、1-2、1-3', '第二集是 2-1、2-2', '回忆、预想、幻想与返回现实要清楚', '改编说明只放入 notes']) assert.ok(novelToScriptPrompt.includes(rule), rule);
   const schema = JSON.parse(novelToScriptPrompt.split('\n').find(line => line.startsWith('{"script":')));
   assert.deepEqual(Object.keys(schema), ['script', 'notes']);
   assert.doesNotMatch(novelToScriptPrompt, /必须每集反转|每集15秒|每场必须推镜|场1  实际地点/);
