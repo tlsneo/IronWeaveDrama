@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { inTransaction } from './database.js';
 import { changeCreation } from './creation.js';
-import { renderCreation } from './render-creation.js';
+import { renderCreation, renderCreationNavigation } from './render-creation.js';
 import { escapeHtml, deleteButton } from './html.js';
 import { saveCharacter, findCharacter } from './characters.js';
 import { renderCharacters } from './render-characters.js';
@@ -246,7 +246,7 @@ export function createApp(database) {
             const content = await readFile(new URL('../views/resource-empty.html', import.meta.url), 'utf8');
             workspace = { title: resource.name, description: resource.description, actions: '', content: content.replaceAll('<!-- RESOURCE_NAME -->', resource.name) };
           }
-        } else if (['scripts', 'seasons', 'episode'].includes(view)) {
+        } else if (['scripts', 'seasons', 'episode', 'storyboards'].includes(view)) {
           workspace = renderCreation(database, id, view, query);
         } else {
           send(404, 'text/plain', '创作页面不存在');
@@ -261,8 +261,10 @@ export function createApp(database) {
           .replaceAll('<!-- WORKSPACE_DESCRIPTION -->', () => escapeHtml(workspace.description))
           .replaceAll('<!-- WORKSPACE_ACTIONS -->', () => workspace.actions)
           .replaceAll('<!-- WORKSPACE_CONTENT -->', () => workspace.content)
-          .replaceAll('<!-- SCRIPTS_CURRENT -->', view === 'scripts' ? 'page' : 'false')
-          .replaceAll('<!-- SEASONS_CURRENT -->', ['seasons', 'episode'].includes(view) ? 'page' : 'false')
+          .replaceAll('<!-- SCRIPTS_CURRENT -->', ['scripts', 'episode'].includes(view) ? 'page' : 'false')
+          .replaceAll('<!-- STORYBOARDS_CURRENT -->', view === 'storyboards' ? 'page' : 'false')
+          .replaceAll('<!-- SEASONS_CURRENT -->', view === 'seasons' ? 'page' : 'false')
+          .replaceAll('<!-- CREATION_HIERARCHY -->', () => renderCreationNavigation(database, id, view, query))
           .replaceAll(/<!-- (CHARACTERS|SCENES|PROPS|COSTUMES)_CURRENT -->/g, (_match, type) => view === 'resources' && type.toLowerCase() === resourceType ? 'page' : 'false');
         send(200, 'text/html', html);
         return;

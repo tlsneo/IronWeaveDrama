@@ -92,8 +92,93 @@ test('集在所属季内创建、改名、排序，剧本入口与分集入口�
   assert.match(html, /<h2 id="resource-title">新的开场<\/h2>/);
   assert.match(html, /本集剧本/);
   assert.match(html, /分镜/);
-  assert.match(html, /href="\?view=seasons" aria-current="page"/);
-  assert.doesNotMatch(html, /<!-- (?:PROJECT|WORKSPACE|RESOURCE|SEASONS|SCRIPTS)_/);
+  assert.match(html, /href="\?view=scripts" aria-current="page"/);
+  assert.doesNotMatch(html, /<!-- (?:PROJECT|WORKSPACE|RESOURCE|SEASONS|SCRIPTS|STORYBOARDS|CREATION)_/);
+});
+
+test('剧本与分镜使用独立页面和本集导航，旧剧本地址仍有效，分镜不加载剧本表单或模型配置', async t => {
+  const f = await fixture(t);
+  const p = await f.project();
+  const episode = await saved(await f.post(`/projects/${p.id}/episodes`, { name: '开场', seasonId: p.season.id }));
+  f.database.prepare('INSERT INTO episode_scripts (episode_id, source, script, notes, revision) VALUES (?, ?, ?, ?, 1)').run(episode.id, '原文', '已保存剧本', '改编说明');
+  const scriptUrl = `/projects/${p.id}?view=episode&episode=${episode.id}`;
+  const shotsUrl = `/projects/${p.id}?view=storyboards&episode=${episode.id}`;
+  const script = await (await f.get(scriptUrl)).text();
+  assert.match(script, /id="episode-script-form"/);
+  assert.match(script, /已保存剧本/);
+  assert.doesNotMatch(script, /还没有分镜|episode-shots-title|episode-workspace/);
+  assert.match(script, /href="\?view=scripts" aria-current="page"/);
+  assert.ok(script.includes(`href="${shotsUrl}" aria-current="false">分镜`));
+  const response = await f.get(shotsUrl);
+  assert.equal(response.status, 200);
+  const shots = await response.text();
+  assert.match(shots, /还没有分镜/);
+  assert.match(shots, /镜头图.*Ref2VA/);
+  assert.match(shots, /分镜与镜头图生成尚未接入/);
+  assert.doesNotMatch(shots, /id="episode-script-form"|id="generate-episode-script"|已保存剧本/);
+  assert.match(shots, /href="\?view=storyboards" aria-current="page"/);
+  assert.ok(shots.includes(`href="${scriptUrl}" aria-current="false">剧本`));
+  assert.ok(shots.includes(`href="${shotsUrl}" aria-current="page">分镜`));
+  const list = await (await f.get(`/projects/${p.id}?view=storyboards`)).text();
+  assert.ok(list.includes(`href="${shotsUrl}"`));
+  assert.match(list, /本集分镜 →/);
+  assert.doesNotMatch(list, /id="episode-script-form"|<!-- STORYBOARDS_CURRENT -->|<!-- CREATION_HIERARCHY -->/);
+  assert.equal(f.database.prepare('SELECT script FROM episode_scripts WHERE episode_id = ?').get(episode.id).script, '已保存剧本');
+});
+
+test('创作侧栏展示项目内季集树，展开当前季并标记当前集，分镜切集保持分镜页面，顺序和名称实时更新', async t => {
+  const f = await fixture(t);
+  const p = await f.project();
+  const first = await saved(await f.post(`/projects/${p.id}/episodes`, { name: '第一季开场', seasonId: p.season.id }));
+  const season = await saved(await f.post(`/projects/${p.id}/seasons`, { name: '续篇' }));
+  const one = await saved(await f.post(`/projects/${p.id}/episodes`, { name: '续篇开场', seasonId: season.id }));
+  const two = await saved(await f.post(`/projects/${p.id}/episodes`, { name: '<镜头> & 第二集', seasonId: season.id }));
+  const otherProject = await f.project('外部项目');
+  await saved(await f.post(`/projects/${otherProject.id}/episodes`, { name: '不能出现在树里', seasonId: otherProject.season.id }));
+  await saved(await f.post(`/projects/${p.id}/episodes/${two.id}/move`, { direction: 'up' }), 200);
+  for (const view of ['episode', 'storyboards']) {
+    const html = await (await f.get(`/projects/${p.id}?view=${view}&episode=${one.id}`)).text();
+    const tree = html.match(/<nav class="creation-tree"[\s\S]*?<\/nav>/)[0];
+    assert.match(tree, /S01 · 第一季/);
+    assert.match(tree, /data-current="true" open>\s*<summary><span class="creation-tree-name">S02 · 续篇/);
+    assert.ok(tree.indexOf('&lt;镜头&gt; &amp; 第二集') < tree.indexOf('续篇开场'));
+    assert.ok(tree.includes(`href="/projects/${p.id}?view=${view}&episode=${one.id}" aria-current="page"><span class="episode-number">02</span>`));
+    assert.ok(tree.includes(`href="/projects/${p.id}?view=${view}&episode=${first.id}" aria-current="false"`));
+    assert.doesNotMatch(tree, /不能出现在树里|<镜头>/);
+    const breadcrumb = html.match(/<nav class="episode-breadcrumb"[\s\S]*?<\/nav>/)[0];
+    assert.match(breadcrumb, /S02 · 续篇/);
+    assert.match(breadcrumb, /E02 · 续篇开场/);
+  }
+  await saved(await f.post(`/projects/${p.id}/seasons/${season.id}`, { name: '重命名季' }), 200);
+  await saved(await f.post(`/projects/${p.id}/seasons/${season.id}/move`, { direction: 'up' }), 200);
+  for (const query of ['view=seasons', 'view=scripts', 'view=storyboards', 'resource=characters']) {
+    const html = await (await f.get(`/projects/${p.id}?${query}`)).text();
+    const tree = html.match(/<nav class="creation-tree"[\s\S]*?<\/nav>/)[0];
+    assert.match(tree, /S01 · 重命名季/);
+    assert.match(tree, /S02 · 第一季/);
+    assert.doesNotMatch(tree, /不能出现在树里|aria-current="page"/);
+  }
+  const css = await (await f.get('/styles.css')).text();
+  assert.match(css, /\.creation-tree-episode\[aria-current="page"\]/);
+  assert.match(css, /:root\[data-theme="dark"\].*\.episode-tabs a\[aria-current="page"\]/);
+  assert.match(css, /\.creation-tree \{ max-height: 240px; \}/);
+});
+
+test('分镜页拒绝无效、重复或跨项目集参数，空项目有诚实的季集空状态', async t => {
+  const f = await fixture(t);
+  const p = await f.project();
+  const other = await f.project();
+  const episode = await saved(await f.post(`/projects/${other.id}/episodes`, { name: '其他项目集', seasonId: other.season.id }));
+  for (const query of ['episode=', 'episode=invalid', 'episode=0', 'episode=99999', `episode=${episode.id}`, `episode=${episode.id}&episode=${episode.id}`]) {
+    assert.equal((await f.get(`/projects/${p.id}?view=storyboards&${query}`)).status, 404);
+  }
+  const emptySeason = await (await f.get(`/projects/${p.id}?view=storyboards`)).text();
+  assert.match(emptySeason, /还没有分集/);
+  assert.match(emptySeason, /creation-tree-empty">还没有集/);
+  await saved(await f.post(`/projects/${p.id}/seasons/${p.season.id}/delete`, { confirmed: 'yes', name: '第一季' }), 200);
+  const emptyProject = await (await f.get(`/projects/${p.id}?view=storyboards`)).text();
+  assert.match(emptyProject, /还没有季和集/);
+  assert.match(emptyProject, /creation-tree-empty">还没有季/);
 });
 
 test('名称、所属季和排序方向均在服务端验证，失败不写入数据', async t => {
