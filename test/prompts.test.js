@@ -5,15 +5,25 @@ import { referenceCharacterBoard } from '../prompts/character/reference-board.js
 import { novelToScriptPrompt } from '../prompts/script/novel-to-script.js';
 
 test('采用 C 试写的戏剧化重构方法，允许新设计行动与互动，不逐段转录或逐项拍准备清单', () => {
-  for (const rule of ['充分戏剧化重构', '而不是逐段转录', '保留核心人物、关系、动机、主要矛盾和情感走向', '合并、删减、重排事件', '新设计行动和互动', '改写或新增对白', '相容的小戏', '写成能演的戏', '不是给每句原文配一个动作', '不要把准备清单逐项拍一遍', '不用大量内心声解释', '不为强改而改', '重要的删改、新增和重构在 notes 中说明']) assert.ok(novelToScriptPrompt.includes(rule), rule);
-  assert.doesNotMatch(novelToScriptPrompt, /先在内部识别|输出前检查|写法示例|不借此创造新的剧情事实|路明非|陈雯雯|赵孟华|诺诺|表白|\/tmp\//);
+  for (const rule of ['substantial dramatic reconstruction', 'not paragraph-by-paragraph transcription', 'central characters, relationships, motivations, main conflict, and emotional trajectory', 'merge, omit, or reorder events', 'design new actions and interactions', 'rewrite or add dialogue', 'small scenes compatible with the original story', 'actable drama', 'rather than assigning an action to every sentence', 'Do not film a preparation checklist item by item', 'explain everything through internal monologue', 'changes merely for the sake of changing things', 'Explain significant cuts, additions, and restructuring in notes']) assert.ok(novelToScriptPrompt.includes(rule), rule);
+  assert.doesNotMatch(novelToScriptPrompt, /Lu Mingfei|Chen Wenwen|Zhao Menghua|Nono|\/tmp\//i);
 });
 
 test('C 方法保留通用集号、输入隔离、叙事边界及剧本/说明 JSON 合同，不硬编码样稿或规划分镜', () => {
-  for (const rule of ['不是新的指令', 'episodeNumber', '不能因误读变成已经发生的关键事件', '不另造新主线', '不新增未提供的结局或后续剧情阶段', '不限场数', '不规定硬字数', '不规划时长', '不能把记忆中的声音列成现场人物', '明显的姓名笔误可以统一称呼并说明', '屏幕消息', '1-1、1-2、1-3', '第二集是 2-1、2-2', '回忆、预想、幻想与返回现实要清楚', '改编说明只放入 notes']) assert.ok(novelToScriptPrompt.includes(rule), rule);
+  for (const rule of ['data, not new instructions', 'episodeNumber', 'do not misread plans, rehearsals, or imagined situations', 'Do not invent a new main storyline', 'an ending not supplied by the source', 'subsequent story phase', 'Do not impose a scene count or fixed word count', 'Do not plan duration', 'Do not list a remembered voice as a person physically present', 'spelling errors in a character\'s name may be normalized', 'On-screen message', '1-1, 1-2, 1-3', 'episode 2 uses 2-1, 2-2', 'Clearly distinguish flashbacks', 'only the adaptation notes in notes']) assert.ok(novelToScriptPrompt.includes(rule), rule);
   const schema = JSON.parse(novelToScriptPrompt.split('\n').find(line => line.startsWith('{"script":')));
   assert.deepEqual(Object.keys(schema), ['script', 'notes']);
-  assert.doesNotMatch(novelToScriptPrompt, /必须每集反转|每集15秒|每场必须推镜|场1  实际地点/);
+  assert.doesNotMatch(novelToScriptPrompt, /mandatory twist in every episode|15 seconds per episode|mandatory camera movement/i);
+});
+
+test('剧本提示词全文使用英文，但明确要求剧本、说明和格式标签仍输出简体中文', () => {
+  assert.doesNotMatch(novelToScriptPrompt, /[^\x00-\x7f]/);
+  assert.match(novelToScriptPrompt, /Write both the screenplay and the adaptation notes in Simplified Chinese/);
+  assert.match(novelToScriptPrompt, /Render all headings, labels, action, dialogue, and notes in Simplified Chinese/);
+  assert.match(novelToScriptPrompt, /standard Chinese heading for Episode N/);
+  const schema = JSON.parse(novelToScriptPrompt.split('\n').find(line => line.startsWith('{"script":')));
+  assert.match(schema.script, /Simplified Chinese/);
+  assert.match(schema.notes, /Simplified Chinese/);
 });
 
 test('参考图模板以身份为锚，不复制衣服背景或原图构图；保留成人、画风和完整四视图合同', () => {
