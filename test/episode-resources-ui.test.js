@@ -79,20 +79,23 @@ function resourceForm(candidateChoices = null) {
   });
   return Object.assign(form, { targets, button, error });
 }
-function resourcesPage(fetch, { forms = [resourceForm(['17', 'new', 'ignore'])], scriptDirty = '', hash = '', hashTarget = null, scriptPresent = true } = {}) {
+function resourcesPage(fetch, { forms = [resourceForm(['17', 'new', 'ignore'])], scriptDirty = '', hash = '', hashTarget = null, scriptPresent = true, confirmed = true } = {}) {
   const main = { inert: false }, scriptForm = node({ dataset: { dirty: scriptDirty } });
-  const events = {}, redirects = [], reloadWarnings = [];
+  const events = {}, redirects = [], reloadWarnings = [], confirmations = [], removeError = node();
   runInNewContext(resourcesScript, {
     document: {
+      addEventListener(event, handler) { assert.equal(event, 'click'); events.click = handler; },
       querySelector(selector) { assert.equal(selector, 'main'); return main; },
       querySelectorAll(selector) { assert.equal(selector, resourceFormsSelector); return forms; },
       getElementById(id) {
         if (id === 'episode-script-form') return scriptPresent ? scriptForm : null;
+        if (id === 'episode-resource-remove-error') return removeError;
         if (id === hash.slice(1)) return hashTarget;
         throw new Error(`Unexpected id: ${id}`);
       },
     },
     window: {
+      confirm(message) { confirmations.push(message); return confirmed; },
       location: { hash, assign() { assert.fail('Same-document assignment would not refresh candidates'); }, reload() {
         assert.equal(main.inert, false); reloadWarnings.push(leave(events.beforeunload));
         redirects.push({ url: currentUrl(this.hash), dirty: forms.map(form => form.dataset.dirty) });
@@ -101,7 +104,9 @@ function resourcesPage(fetch, { forms = [resourceForm(['17', 'new', 'ignore'])],
     },
     URLSearchParams, TypeError, Error, fetch,
   });
-  return { forms, main, scriptForm, redirects, reloadWarnings, events, beforeUnload: () => leave(events.beforeunload) };
+  return { forms, main, scriptForm, redirects, reloadWarnings, events, removeError, confirmations,
+    remove(button) { return events.click({ preventDefault() {}, target: { closest(selector) { assert.equal(selector, '[data-resource-remove]'); return button; } } }); },
+    beforeUnload: () => leave(events.beforeunload) };
 }
 function screenplayPage(fetch, { revision = '7', withExtract = true, confirmed = true, resources = [] } = {}) {
   const ids = ['episode-script-form', 'episode-script-source', 'episode-script-text', 'episode-script-notes', 'episode-script-api',
@@ -254,6 +259,29 @@ test('occurrence deep links also open the enclosing archived/review section', ()
   const target = { open: false, parentElement: parent, scrollIntoView() { assert.equal(parent.open, true); } };
   resourcesPage(() => assert.fail('Navigation must not call models'), { hash: '#occurrence-9', hashTarget: target });
   assert.equal(target.open, true); assert.equal(parent.open, true);
+});
+
+test('删除图标先确认本集范围，发送版本与精确目标，阻止重复提交，成功刷新且没有忙碌退出提醒', async () => {
+  const response = deferred(), calls = [];
+  const p = resourcesPage((url, options) => { calls.push({ url, ...options }); return response.promise; });
+  const button = node({ dataset: { url: `${base}/remove-resources`, batchRevision: '5', scriptRevision: '7', targets: '{"type":"candidates","items":[0,2]}', name: '林秋', whole: 'true' } });
+  const pending = p.remove(button); await p.remove(button);
+  assert.equal(calls.length, 1); assert.equal(p.main.inert, true); assert.equal(button.disabled, true); assert.equal(p.beforeUnload(), true);
+  assert.match(p.confirmations[0], /全部出场位置.*不删除全剧共享档案.*不影响其他集/);
+  assert.deepEqual(Object.fromEntries(calls[0].body), { confirmed: 'yes', batchRevision: '5', scriptRevision: '7', targets: button.dataset.targets });
+  response.resolve(ok({ redirect: `${redirect}#episode-resources` })); await pending;
+  assert.deepEqual(p.reloadWarnings, [false]); assert.equal(button.disabled, false); assert.equal(p.main.inert, false);
+});
+
+test('取消、未保存修改及删除失败都不丢输入、不移除DOM、不自动重试，成功前不刷新', async () => {
+  const button = node({ dataset: { url: `${base}/remove-resources`, batchRevision: '5', scriptRevision: '7', targets: '{"type":"occurrences","items":[{"id":9,"revision":3}]}', name: '林秋', whole: 'false' } });
+  const cancelled = resourcesPage(() => assert.fail('取消不调用'), { confirmed: false }); await cancelled.remove(button); assert.deepEqual(cancelled.redirects, []);
+  const dirty = resourcesPage(() => assert.fail('未保存不调用')); dirty.forms[0].fire('input'); await dirty.remove(button);
+  assert.match(dirty.removeError.textContent, /未保存/); assert.equal(dirty.forms[0].dataset.dirty, 'true');
+  for (const failure of [async () => rejected({ error: '版本冲突' }), async () => { throw new TypeError('offline'); }, async () => ({ ok: true, json: async () => { throw new SyntaxError('bad json'); } })]) {
+    let calls = 0; const p = resourcesPage(async () => { calls++; return failure(); }); await p.remove(button);
+    assert.equal(calls, 1); assert.deepEqual(p.redirects, []); assert.ok(p.removeError.textContent); assert.equal(p.main.inert, false); assert.equal(button.disabled, false);
+  }
 });
 
 test('unsaved screenplay, inert main and disabled submit prevent both candidate and occurrence saves', async t => {

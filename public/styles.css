@@ -174,6 +174,11 @@ h2 { margin: 0; font-size: 23px; font-weight: 600; line-height: 1.5; }
 .resource-candidate legend { padding: 0 8px; font-size: 14px; }
 .resource-position + .resource-position { margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e5dd; }
 .resource-review > summary { padding: 16px 0; cursor: pointer; font-size: 14px; }
+.resource-remove { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; padding: 6px; margin-left: 8px; border: 0; border-radius: 6px; background: transparent; color: #98625c; cursor: pointer; vertical-align: middle; }
+.resource-remove:hover { background: #f7e8e5; color: #9e4036; }
+.resource-remove:focus-visible { outline: 2px solid currentColor; outline-offset: 2px; }
+.resource-remove:disabled { opacity: .5; cursor: wait; }
+.resource-position-heading .resource-remove { float: right; }
 .occurrence-quote { margin: 12px 0; padding: 12px 16px; border-left: 3px solid #cbd5cd; background: #f7f8f5; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.8; }
 .occurrence-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 16px; }
 .resource-occurrence { margin-top: 12px; border: 1px solid #e0e5dd; border-radius: 10px; }
@@ -321,6 +326,8 @@ h2 { margin: 0; font-size: 23px; font-weight: 600; line-height: 1.5; }
 :root[data-theme="dark"] .api-type-badge { background: #28382f; color: #bfd8c5; }
 :root[data-theme="dark"] :is(.settings-check, .resource-candidate, .resource-position, .resource-occurrence, .resource-appearance) { border-color: #35433a; }
 :root[data-theme="dark"] .occurrence-quote { background: #253229; border-color: #425647; }
+:root[data-theme="dark"] .resource-remove { color: #e4a99f; }
+:root[data-theme="dark"] .resource-remove:hover { background: #442e2c; color: #ffc8bf; }
 :root[data-theme="dark"] .settings-panel .settings-status { color: #bfd8c5; }
 :root[data-theme="dark"] .settings-panel .form-error { color: #f0a4a4; }
 :root[data-theme="dark"] .settings-panel .settings-status[data-state="unverified"] { color: #ddc089; }

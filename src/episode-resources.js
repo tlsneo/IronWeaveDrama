@@ -29,7 +29,7 @@ function locate(script, quote, heading) {
 }
 export function readEpisodeResources(database, episodeId) {
   const batch = database.prepare('SELECT * FROM episode_extractions WHERE episode_id = ?').get(episodeId);
-  return { revision: batch?.revision ?? 0, scriptRevision: batch?.script_revision ?? 0, candidates: batch ? JSON.parse(batch.candidates).filter(isVisualOccurrence) : [],
+  return { revision: batch?.revision ?? 0, scriptRevision: batch?.script_revision ?? 0, candidates: batch ? JSON.parse(batch.candidates).filter(item => isVisualOccurrence(item) && !item.ignored) : [],
     occurrences: database.prepare('SELECT * FROM episode_occurrences WHERE episode_id = ? ORDER BY source_start, kind, id').all(episodeId) };
 }
 export function resourceChoices(database, projectId, kind) {
@@ -110,7 +110,7 @@ export async function extractEpisodeResources(database, projectId, episodeId, fo
         findEpisode(database, projectId, episodeId);
         const current = readEpisodeScript(database, episodeId);
         if (current.revision !== draft.revision || current.script !== draft.script || readEpisodeResources(database, episodeId).revision !== batch.revision) reject(409, '提取期间剧本或关联已变化，结果未覆盖；请保留返回文本。', { recoveryText });
-        candidates = enrich(database, projectId, episodeId, candidates);
+        candidates = enrich(database, projectId, episodeId, candidates).filter(item => !item.ignored);
         const found = new Set(candidates.map(item => item.occurrenceId));
         for (const row of batch.occurrences) if (!row.ignored && !row.needs_review && !found.has(row.id)) database.prepare('UPDATE episode_occurrences SET needs_review = 1, revision = revision + 1 WHERE id = ? AND episode_id = ?').run(row.id, episodeId);
         database.prepare(`INSERT INTO episode_extractions (episode_id, script_revision, revision, candidates) VALUES (?, ?, ?, ?)
@@ -186,6 +186,46 @@ export function confirmEpisodeResources(database, projectId, episodeId, form) {
     return { message: '本集关联已保存；已有资源档案未修改，其他集记录不变。', redirect: `/projects/${projectId}?view=episode&episode=${episodeId}#episode-resources` };
   });
 }
+export function removeEpisodeResources(database, projectId, episodeId, form) {
+  findEpisode(database, projectId, episodeId); assertEpisodeScriptsIdle(database, [episodeId]);
+  if (form.getAll('confirmed').length !== 1 || form.get('confirmed') !== 'yes') reject(400, '请先确认只删除本集提取项／关联，不删除共享档案。');
+  const batchRevision = number(form, 'batchRevision', true); const scriptRevision = number(form, 'scriptRevision', true);
+  let targets;
+  if (form.getAll('targets').length !== 1) reject(400, '删除范围无效。');
+  try { targets = JSON.parse(form.get('targets')); } catch { reject(400, '删除范围无效。'); }
+  if (!targets || !['candidates', 'occurrences'].includes(targets.type) || !Array.isArray(targets.items) || !targets.items.length || targets.items.length > 200) reject(400, '请选择本集要删除的项，单次最多 200 处。');
+  return inTransaction(database, () => {
+    const batch = readEpisodeResources(database, episodeId);
+    if (batch.revision !== batchRevision || readEpisodeScript(database, episodeId).revision !== scriptRevision) reject(409, '剧本或提取结果已变化，请刷新核对后再删除。');
+    const seen = new Set();
+    for (const item of targets.items) {
+      const index = targets.type === 'candidates' ? item : item?.id;
+      if (!Number.isSafeInteger(index) || index < (targets.type === 'candidates' ? 0 : 1) || seen.has(index)) reject(400, '删除编号无效或重复。');
+      seen.add(index);
+      if (targets.type === 'candidates') {
+        const candidate = batch.candidates[index];
+        if (!candidate) reject(409, '提取项已变化，请刷新核对。');
+        if (candidate.occurrenceId) {
+          const result = database.prepare('UPDATE episode_occurrences SET character_id = NULL, scene_id = NULL, ignored = 1, needs_review = 0, revision = revision + 1 WHERE id = ? AND episode_id = ?').run(candidate.occurrenceId, episodeId);
+          if (result.changes !== 1) reject(409, '原出场记录已变化，本次删除未保存。');
+        } else {
+          database.prepare(`INSERT INTO episode_occurrences (episode_id, kind, source_name, scene_heading, quote, source_start, mode, details, script_revision, ignored)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1) ON CONFLICT(episode_id, kind, source_name, quote) DO UPDATE SET
+            character_id = NULL, scene_id = NULL, ignored = 1, needs_review = 0, revision = revision + 1`).run(episodeId, candidate.kind, candidate.name, candidate.sceneHeading, candidate.quote, candidate.sourceStart, candidate.mode, candidate.details, batch.scriptRevision);
+        }
+      } else {
+        const row = batch.occurrences.find(row => row.id === index);
+        if (!row) reject(404, '出场记录不存在或不属于本集。');
+        if (!Number.isSafeInteger(item.revision) || item.revision !== row.revision) reject(409, '出场记录已变化，本次删除未保存。');
+        database.prepare('UPDATE episode_occurrences SET character_id = NULL, scene_id = NULL, ignored = 1, needs_review = 0, revision = revision + 1 WHERE id = ? AND episode_id = ?').run(index, episodeId);
+      }
+    }
+    const remaining = targets.type === 'candidates' ? batch.candidates.filter((item, index) => !seen.has(index)) : batch.candidates;
+    database.prepare('UPDATE episode_extractions SET candidates = ?, revision = revision + 1 WHERE episode_id = ?').run(JSON.stringify(enrich(database, projectId, episodeId, remaining).filter(item => !item.ignored)), episodeId);
+    return { message: '已删除本集提取项／关联，共享档案与其他集不变。', redirect: `/projects/${projectId}?view=episode&episode=${episodeId}#episode-resources` };
+  });
+}
+
 export function updateEpisodeOccurrence(database, projectId, episodeId, occurrenceId, form) {
   findEpisode(database, projectId, episodeId); assertEpisodeScriptsIdle(database, [episodeId]);
   const revision = number(form, 'revision'); const scriptRevision = number(form, 'scriptRevision');

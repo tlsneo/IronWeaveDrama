@@ -11,7 +11,7 @@ import { renderSettings } from './render-settings.js';
 import { generateCharacterBoard, clearCharacterBoard, saveCharacterReference, clearCharacterReference } from './character-images.js';
 import { deleteItem } from './deletion.js';
 import { saveEpisodeScript, generateEpisodeScript } from './episode-scripts.js';
-import { extractEpisodeResources, confirmEpisodeResources, updateEpisodeOccurrence } from './episode-resources.js';
+import { extractEpisodeResources, confirmEpisodeResources, updateEpisodeOccurrence, removeEpisodeResources } from './episode-resources.js';
 import { saveScene, renderScenes } from './scenes.js';
 
 const resourceTypes = new Map([
@@ -99,7 +99,7 @@ export function createApp(database) {
     const deleteConfigRoute = path.match(/^\/settings\/api\/([1-9]\d*)\/delete$/);
     const creationRoute = path.match(/^\/projects\/([1-9]\d*)\/(seasons|episodes)(?:\/([1-9]\d*)(\/move)?)?$/);
     const scriptRoute = path.match(/^\/projects\/([1-9]\d*)\/episodes\/([1-9]\d*)\/(script|generate-script)$/);
-    const extractionRoute = path.match(/^\/projects\/([1-9]\d*)\/episodes\/([1-9]\d*)\/(extract-resources|confirm-resources|resource-occurrences\/([1-9]\d*))$/);
+    const extractionRoute = path.match(/^\/projects\/([1-9]\d*)\/episodes\/([1-9]\d*)\/(extract-resources|confirm-resources|remove-resources|resource-occurrences\/([1-9]\d*))$/);
     const sceneRoute = path.match(/^\/projects\/([1-9]\d*)\/scenes(?:\/([1-9]\d*))?$/);
     const characterRoute = path.match(/^\/projects\/([1-9]\d*)\/characters(?:\/([1-9]\d*))?$/);
     const generationRoute = path.match(/^\/projects\/([1-9]\d*)\/characters\/([1-9]\d*)\/(generate|edit-image|clear-image)$/);
@@ -123,6 +123,7 @@ export function createApp(database) {
         if (![projectId, id, ...(occurrenceId === undefined ? [] : [occurrenceId])].every(Number.isSafeInteger)) { json(404, { error: '集或出场记录不存在' }); return; }
         json(200, extractionRoute[3] === 'extract-resources' ? await extractEpisodeResources(database, projectId, id, form)
           : extractionRoute[3] === 'confirm-resources' ? confirmEpisodeResources(database, projectId, id, form)
+          : extractionRoute[3] === 'remove-resources' ? removeEpisodeResources(database, projectId, id, form)
           : updateEpisodeOccurrence(database, projectId, id, occurrenceId, form));
         return;
       }

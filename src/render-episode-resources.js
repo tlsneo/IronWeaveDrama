@@ -31,14 +31,19 @@ export function renderEpisodeResources(database, projectId, episodeId, draft, co
   const batch = readEpisodeResources(database, episodeId);
   const choices = { character: resourceChoices(database, projectId, 'character'), scene: resourceChoices(database, projectId, 'scene') };
   const base = `/projects/${projectId}/episodes/${episodeId}`;
+  function removeButton(type, items, name, whole = false) {
+    const targets = type === 'candidates' ? items.map(item => item.index) : items.map(item => ({ id: item.id, revision: item.revision }));
+    const label = `删除${whole ? '本集整项' : '这一处'}：${name}`;
+    return `<button type="button" class="resource-remove" data-resource-remove data-url="${base}/remove-resources" data-batch-revision="${batch.revision}" data-script-revision="${draft.revision}" data-targets="${escapeHtml(JSON.stringify({ type, items: targets }))}" data-name="${escapeHtml(name)}" data-whole="${whole}" title="${escapeHtml(label)}" aria-label="${escapeHtml(label)}"><svg aria-hidden="true" viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="1.6"><path d="M4 7h16M9 7V4h6v3M6 7l1 13h10l1-13M10 10v7m4-7v7"/></svg></button>`;
+  }
   const candidateGroups = resourceGroups(batch.candidates.map((item, index) => ({ ...item, index })), choices);
   const candidates = batch.candidates.length ? `<form id="episode-resource-candidates" data-url="${base}/confirm-resources" data-batch-revision="${batch.revision}" data-script-revision="${batch.scriptRevision}">
     <h4>待确认的提取草稿 · ${candidateGroups.length} 项资源 · ${batch.candidates.length} 处画面出场</h4>
     ${batch.scriptRevision !== draft.revision ? '<p class="form-error">剧本已变化，这份草稿不能直接确认。请重新提取。</p>' : ''}
     <p class="field-help">每项资源只列一次，下面保留各场的画面出场位置；每处关联仍可单独修正。已有档案只关联不修改，同名不同档案不合并。同类同名的新建项共用一个资源，请统一描述；不同资源请使用可区分的名称。</p>
-    ${candidateGroups.map(group => `<fieldset class="resource-candidate resource-group"><legend>${group.kind === 'character' ? '角色' : '场景'} · ${escapeHtml(group.name)} · ${group.items.length} 处</legend>
+    ${candidateGroups.map(group => `<fieldset class="resource-candidate resource-group"><legend>${group.kind === 'character' ? '角色' : '场景'} · ${escapeHtml(group.name)} · ${group.items.length} 处 ${removeButton('candidates', group.items, group.name, true)}</legend>
       ${group.items.map(candidate => `<div class="resource-position" data-resource-candidate data-candidate-index="${candidate.index}" data-kind="${candidate.kind}">
-        <p class="field-help">${escapeHtml(candidate.sceneHeading || '未标场标题')} · ${occurrenceModes[candidate.mode]} · ${batch.scriptRevision === draft.revision ? `正文第 ${draft.script.slice(0, candidate.sourceStart).split('\n').length} 行起` : '旧版位置，待核对'}</p><blockquote class="occurrence-quote">${escapeHtml(candidate.quote)}</blockquote>
+        <p class="field-help resource-position-heading">${escapeHtml(candidate.sceneHeading || '未标场标题')} · ${occurrenceModes[candidate.mode]} · ${batch.scriptRevision === draft.revision ? `正文第 ${draft.script.slice(0, candidate.sourceStart).split('\n').length} 行起` : '旧版位置，待核对'} ${removeButton('candidates', [candidate], candidate.name)}</p><blockquote class="occurrence-quote">${escapeHtml(candidate.quote)}</blockquote>
         ${candidate.needsReview ? '<p class="form-error">原文位置无法唯一对应旧记录，请核对本条与下方旧记录后明确选择；不会自动恢复已移除的关联。</p>' : ''}
         ${selectionFields(candidate.kind, candidate, choices[candidate.kind], candidate.suggestedId, candidate.ignored)}
       </div>`).join('')}
@@ -48,14 +53,14 @@ export function renderEpisodeResources(database, projectId, episodeId, draft, co
   </form>` : '';
   const visible = batch.occurrences.filter(isVisualOccurrence);
   const current = visible.filter(row => !row.ignored && !row.needs_review && row.script_revision === draft.revision && choices[row.kind].some(item => item.id === (row.character_id ?? row.scene_id)));
-  const review = visible.filter(row => !current.includes(row));
+  const review = visible.filter(row => !row.ignored && !current.includes(row));
   function record(row) {
     const resourceId = row.character_id ?? row.scene_id;
     const resource = choices[row.kind].find(item => item.id === resourceId);
     const stale = row.script_revision !== draft.revision;
     const status = row.ignored ? '已移除关联' : !resource ? '资源已删除，需重新关联' : row.needs_review ? '本次提取未发现，待核对' : stale ? '剧本已变化，待核对' : '已确认';
     const url = resource ? `/projects/${projectId}?resource=${row.kind === 'character' ? `characters&character=${resource.id}` : `scenes&scene=${resource.id}`}` : '';
-    return `<details class="resource-occurrence" id="occurrence-${row.id}"><summary><span>${escapeHtml(row.scene_heading || '未标场标题')} · ${occurrenceModes[row.mode]}</span><span class="character-status">${status}</span></summary>
+    return `<details class="resource-occurrence" id="occurrence-${row.id}"><summary><span>${escapeHtml(row.scene_heading || '未标场标题')} · ${occurrenceModes[row.mode]}</span><span class="character-status">${status}</span>${!row.ignored ? removeButton('occurrences', [row], resource?.name ?? row.source_name) : ''}</summary>
       <div class="occurrence-body"><p class="field-help">提取依据版本 ${row.script_revision}${resource ? ` · <a href="${url}">查看共享资源及全剧出现位置 →</a>` : ''}</p>
         <blockquote class="occurrence-quote">${escapeHtml(row.quote)}</blockquote>
         <form data-occurrence-form data-url="${base}/resource-occurrences/${row.id}" data-revision="${row.revision}" data-script-revision="${draft.revision}">
@@ -67,17 +72,18 @@ export function renderEpisodeResources(database, projectId, episodeId, draft, co
       </div></details>`;
   }
   function records(rows) {
-    return resourceGroups(rows, choices).map(group => `<fieldset class="resource-candidate resource-group"><legend>${group.kind === 'character' ? '角色' : '场景'} · ${escapeHtml(group.name)} · ${group.items.length} 处</legend>${group.items.map(record).join('')}</fieldset>`).join('');
+    return resourceGroups(rows, choices).map(group => `<fieldset class="resource-candidate resource-group"><legend>${group.kind === 'character' ? '角色' : '场景'} · ${escapeHtml(group.name)} · ${group.items.length} 处 ${group.items.some(row => !row.ignored) ? removeButton('occurrences', group.items.filter(row => !row.ignored), group.name, true) : ''}</legend>${group.items.map(record).join('')}</fieldset>`).join('');
   }
   return `<section id="episode-resources" class="creation-panel episode-resources-panel" aria-labelledby="episode-resources-title">
     <div class="episode-resource-heading"><h3 id="episode-resources-title">本集人物与场景</h3><button id="extract-episode-resources" class="create-button" type="button" data-url="${base}/extract-resources" data-batch-revision="${batch.revision}" data-has-candidates="${batch.candidates.length > 0}" ${configs.length ? '' : 'disabled'}>提取／同步人物与场景</button></div>
     <p class="field-help">只提取本集已保存剧本中实际呈现的人物和地点；仅被提及、只有声音或文字而未出镜的不列入。回忆／想象画面真正出场的保留。点击才调用所选模型，不改已有档案或其他集。</p>
+    <p id="episode-resource-remove-error" class="form-error" role="alert"></p>
     ${candidates}
     ${batch.candidates.length ? '<details class="resource-review"><summary>查看同步前已确认的资源</summary>' : ''}
     <h4>已确认人物与场景 · ${resourceGroups(current, choices).length} 项资源 · ${current.length} 处画面出场</h4>
     ${records(current) || '<p class="field-help">还没有已确认的画面出场资源。提取后先核对，再确认关联或新建。</p>'}
     ${batch.candidates.length ? '</details>' : ''}
-    ${review.length ? `<details class="resource-review"><summary>待核对／已移除记录 · ${review.length} 处</summary><p class="field-help">旧记录保留供修正，不重复计入已确认资源。</p>${records(review)}</details>` : ''}
+    ${review.length ? `<details class="resource-review"><summary>待核对记录 · ${review.length} 处</summary><p class="field-help">旧记录保留供修正，不重复计入已确认资源。</p>${records(review)}</details>` : ''}
   </section>`;
 }
 export function renderResourceAppearances(database, projectId, kind, id, query) {

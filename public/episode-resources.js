@@ -56,6 +56,30 @@
       if (redirect) { window.location.hash = redirect.split('#')[1] ?? ''; window.location.reload(); }
     });
   }
+  document.addEventListener('click', async event => {
+    const button = event.target.closest('[data-resource-remove]');
+    if (!button) return;
+    event.preventDefault();
+    if (busy || main.inert || button.disabled) return;
+    const error = document.getElementById('episode-resource-remove-error');
+    error.textContent = '';
+    if (scriptForm?.dataset.dirty || forms.some(form => form.dataset.dirty)) {
+      error.textContent = '还有未保存的剧本或关联修改，请先保存；若不保存，请先复制输入再刷新，然后删除。'; return;
+    }
+    const scope = button.dataset.whole === 'true' ? '这项在列表中的全部出场位置' : '这一处出场位置';
+    if (!window.confirm(`删除「${button.dataset.name}」的${scope}？只移除本集提取项／关联，不删除全剧共享档案，不影响其他集；移除决定会保留。`)) return;
+    busy = true; main.inert = true; button.disabled = true;
+    let redirect;
+    try {
+      const response = await fetch(button.dataset.url, { method: 'POST', body: new URLSearchParams({ confirmed: 'yes', batchRevision: button.dataset.batchRevision, scriptRevision: button.dataset.scriptRevision, targets: button.dataset.targets }) });
+      let result; try { result = await response.json(); } catch { throw new TypeError('响应无法识别'); }
+      if (!response.ok) throw new Error(result.error ?? '删除本集提取项失败。');
+      redirect = result.redirect;
+    } catch (failure) {
+      error.textContent = failure instanceof TypeError ? '删除结果未确认，请刷新核对；不会自动重试。' : failure.message;
+    } finally { busy = false; main.inert = false; button.disabled = false; }
+    if (redirect) { window.location.hash = redirect.split('#')[1] ?? ''; window.location.reload(); }
+  });
   if (/^#occurrence-\d+$/.test(window.location.hash)) {
     const target = document.getElementById(window.location.hash.slice(1));
     if (target) {
