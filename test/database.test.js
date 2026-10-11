@@ -34,7 +34,7 @@ test('旧数据库升级后保留所有项目字段与 ID，允许新比例，�
     database = openDatabase(filename);
     assert.equal(database.prepare('SELECT count(*) AS count FROM projects').get().count, 4);
     assert.deepEqual(database.prepare('SELECT * FROM projects WHERE id = 7').get(), original);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 12);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 13);
     const season = database.prepare('SELECT name, project_id FROM seasons WHERE project_id = 7').get();
     assert.equal(season.name, '第一季');
     assert.equal(season.project_id, 7);

@@ -231,6 +231,12 @@ export function openDatabase(filename) {
         PRAGMA user_version = 12;
       `);
     }
+    if (database.prepare('PRAGMA user_version').get().user_version < 13) {
+      database.exec(`
+        ALTER TABLE episode_occurrences ADD COLUMN needs_review INTEGER NOT NULL DEFAULT 0 CHECK (needs_review IN (0, 1));
+        PRAGMA user_version = 13;
+      `);
+    }
     if (database.prepare('PRAGMA foreign_key_check').all().length) throw new Error('数据库关系检查失败，升级已回滚。');
     database.exec('COMMIT');
     database.exec('PRAGMA foreign_keys = ON');

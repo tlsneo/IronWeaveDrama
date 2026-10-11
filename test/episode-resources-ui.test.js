@@ -38,7 +38,7 @@ function deferred() {
   const promise = new Promise((yes, no) => { resolve = yes; reject = no; });
   return { promise, resolve, reject };
 }
-function resourceTarget(choice = '17') {
+function resourceTarget(choice = '17', index = 0) {
   const controls = {
     '[data-resource-choice]': node({ value: choice, selectedOptions: [{ dataset: { name: '林秋 · 已有档案' } }] }),
     '[data-resource-name]': node({ value: '林秋 · 新档案' }),
@@ -50,7 +50,7 @@ function resourceTarget(choice = '17') {
     '[data-source-quote]': node({ value: '林秋走出雨幕。' }),
   };
   return {
-    controls,
+    controls, dataset: { candidateIndex: String(index) },
     querySelector: selector => lookup(controls, selector),
     querySelectorAll(selector) {
       assert.equal(selector, '[data-resource-name], [data-resource-description]');
@@ -218,10 +218,10 @@ test('occurrence correction, new-resource replacement and removal post current s
     const form = resourceForm(), controls = form.targets[0].controls, calls = [];
     const p = resourcesPage(async (url, options) => { calls.push({ url, ...options }); return ok({ redirect: `${redirect}#occurrence-9` }); }, { forms: [form], scriptPresent: false });
     controls['[data-resource-choice]'].value = choice;
-    controls['[data-resource-mode]'].value = 'off_screen';
-    controls['[data-resource-details]'].value = '电话声音';
+    controls['[data-resource-mode]'].value = 'memory';
+    controls['[data-resource-details]'].value = '回忆中的旧宅';
     controls['[data-scene-heading]'].value = '场3 内景 日';
-    controls['[data-source-quote]'].value = '电话里传来林秋的声音。';
+    controls['[data-source-quote]'].value = '回忆里，林秋推开旧宅的门。';
     form.fire('change');
     await form.fire('submit');
     assert.equal(calls.length, 1);
@@ -230,7 +230,7 @@ test('occurrence correction, new-resource replacement and removal post current s
     assert.deepEqual([...calls[0].body.keys()], ['revision', 'scriptRevision', 'selection']);
     assert.equal(calls[0].body.get('revision'), '3');
     assert.equal(calls[0].body.get('scriptRevision'), '7');
-    const selection = { mode: 'off_screen', details: '电话声音', sceneHeading: '场3 内景 日', quote: '电话里传来林秋的声音。' };
+    const selection = { mode: 'memory', details: '回忆中的旧宅', sceneHeading: '场3 内景 日', quote: '回忆里，林秋推开旧宅的门。' };
     if (choice === '17') Object.assign(selection, { action: 'existing', resourceId: 17, resourceName: '林秋 · 已有档案' });
     else if (choice === 'new') Object.assign(selection, { action: 'new', name: '林秋 · 新档案', description: '深色外套' });
     else selection.action = 'ignore';
@@ -238,6 +238,22 @@ test('occurrence correction, new-resource replacement and removal post current s
     assert.deepEqual(p.redirects, [{ url: `${redirect}#occurrence-9`, dirty: [''] }]);
     assert.equal(p.beforeUnload(), false);
   });
+});
+
+test('grouped candidate DOM order must not swap character/location selections in the original extraction array', async () => {
+  const form = resourceForm(['17', 'new', 'ignore']);
+  form.targets.splice(0, 3, form.targets[0], form.targets[2], form.targets[1]);
+  let submitted;
+  resourcesPage(async (url, options) => { submitted = JSON.parse(options.body.get('selections')); return ok({ redirect }); }, { forms: [form] });
+  await form.fire('submit');
+  assert.deepEqual(submitted.map(item => item.action), ['existing', 'new', 'ignore']);
+});
+
+test('occurrence deep links also open the enclosing archived/review section', () => {
+  const parent = { tagName: 'DETAILS', open: false, parentElement: { tagName: 'FIELDSET' } };
+  const target = { open: false, parentElement: parent, scrollIntoView() { assert.equal(parent.open, true); } };
+  resourcesPage(() => assert.fail('Navigation must not call models'), { hash: '#occurrence-9', hashTarget: target });
+  assert.equal(target.open, true); assert.equal(parent.open, true);
 });
 
 test('unsaved screenplay, inert main and disabled submit prevent both candidate and occurrence saves', async t => {

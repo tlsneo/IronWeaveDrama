@@ -22,7 +22,7 @@
     target.querySelector('[data-resource-name]').required = visible;
   }
   for (const form of forms) {
-    const targets = form.id === 'episode-resource-candidates' ? [...form.querySelectorAll('[data-resource-candidate]')] : [form];
+    const targets = form.id === 'episode-resource-candidates' ? [...form.querySelectorAll('[data-resource-candidate]')].sort((a, b) => Number(a.dataset.candidateIndex) - Number(b.dataset.candidateIndex)) : [form];
     targets.forEach(showNew);
     form.addEventListener('input', () => { form.dataset.dirty = 'true'; });
     form.addEventListener('change', () => { form.dataset.dirty = 'true'; targets.forEach(showNew); });
@@ -58,7 +58,11 @@
   }
   if (/^#occurrence-\d+$/.test(window.location.hash)) {
     const target = document.getElementById(window.location.hash.slice(1));
-    if (target) { target.open = true; target.scrollIntoView(); }
+    if (target) {
+      target.open = true;
+      for (let parent = target.parentElement; parent; parent = parent.parentElement) if (parent.tagName === 'DETAILS') parent.open = true;
+      target.scrollIntoView();
+    }
   }
   window.addEventListener('beforeunload', event => {
     if (busy || forms.some(form => form.dataset.dirty)) { event.preventDefault(); event.returnValue = ''; }

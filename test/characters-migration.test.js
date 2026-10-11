@@ -38,7 +38,7 @@ test('版本 2 升级只新增角色表，保留项目、季和集；重启保�
     const before = originals(database);
     database.close();
     database = openDatabase(filename);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 12);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 13);
     assert.deepEqual(originals(database), before);
     assert.equal(database.prepare('SELECT count(*) AS count FROM characters').get().count, 0);
     database.prepare('INSERT INTO characters (project_id, name, age) VALUES (?, ?, ?)').run(7, '原角色', 25);

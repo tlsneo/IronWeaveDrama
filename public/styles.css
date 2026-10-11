@@ -172,6 +172,8 @@ h2 { margin: 0; font-size: 23px; font-weight: 600; line-height: 1.5; }
 .episode-resources-panel .field-help, .resource-appearances .field-help { margin: 8px 0; line-height: 1.8; }
 .resource-candidate { min-width: 0; margin: 20px 0; padding: 16px 20px 20px; border: 1px solid #e0e5dd; border-radius: 10px; }
 .resource-candidate legend { padding: 0 8px; font-size: 14px; }
+.resource-position + .resource-position { margin-top: 20px; padding-top: 20px; border-top: 1px solid #e0e5dd; }
+.resource-review > summary { padding: 16px 0; cursor: pointer; font-size: 14px; }
 .occurrence-quote { margin: 12px 0; padding: 12px 16px; border-left: 3px solid #cbd5cd; background: #f7f8f5; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.8; }
 .occurrence-fields { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 2fr); gap: 16px; }
 .resource-occurrence { margin-top: 12px; border: 1px solid #e0e5dd; border-radius: 10px; }
@@ -317,7 +319,7 @@ h2 { margin: 0; font-size: 23px; font-weight: 600; line-height: 1.5; }
 :root[data-theme="dark"] .settings-panel-heading > span { color: #a6b3aa; }
 :root[data-theme="dark"] :is(.api-config-count, .api-card-meta dt, .api-card-footer) { color: #a6b3aa; }
 :root[data-theme="dark"] .api-type-badge { background: #28382f; color: #bfd8c5; }
-:root[data-theme="dark"] :is(.settings-check, .resource-candidate, .resource-occurrence, .resource-appearance) { border-color: #35433a; }
+:root[data-theme="dark"] :is(.settings-check, .resource-candidate, .resource-position, .resource-occurrence, .resource-appearance) { border-color: #35433a; }
 :root[data-theme="dark"] .occurrence-quote { background: #253229; border-color: #425647; }
 :root[data-theme="dark"] .settings-panel .settings-status { color: #bfd8c5; }
 :root[data-theme="dark"] .settings-panel .form-error { color: #f0a4a4; }

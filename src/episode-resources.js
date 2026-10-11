@@ -4,7 +4,8 @@ import { readApiConfig } from './settings.js';
 import { callModel, readTextResult, safeModelText } from './model-client.js';
 import { extractResourcesPrompt } from '../prompts/script/extract-resources.js';
 
-export const occurrenceModes = { on_screen: '实际出场', off_screen: '现场画外声', inner_voice: '内心独白', memory: '回忆', imagination: '预想／想象', mentioned: '仅被提及' };
+export const occurrenceModes = { on_screen: '实际画面', memory: '回忆画面', imagination: '想象画面' };
+export function isVisualOccurrence(item) { return Object.hasOwn(occurrenceModes, item.mode); }
 const tables = { character: 'characters', scene: 'scenes' };
 function reject(status, message, extra = {}) { throw Object.assign(new Error(message), { status, ...extra }); }
 function text(value, max, required = false) {
@@ -17,7 +18,7 @@ function number(form, key, zero = false) {
   return Number(raw);
 }
 function mode(kind, value) {
-  if (!Object.hasOwn(occurrenceModes, value) || (kind === 'scene' && ['off_screen', 'inner_voice'].includes(value))) reject(400, '出现方式无效。');
+  if (!Object.hasOwn(occurrenceModes, value)) reject(400, '只接受实际呈现的画面出场类型。');
   return value;
 }
 function locate(script, quote, heading) {
@@ -28,7 +29,7 @@ function locate(script, quote, heading) {
 }
 export function readEpisodeResources(database, episodeId) {
   const batch = database.prepare('SELECT * FROM episode_extractions WHERE episode_id = ?').get(episodeId);
-  return { revision: batch?.revision ?? 0, scriptRevision: batch?.script_revision ?? 0, candidates: batch ? JSON.parse(batch.candidates) : [],
+  return { revision: batch?.revision ?? 0, scriptRevision: batch?.script_revision ?? 0, candidates: batch ? JSON.parse(batch.candidates).filter(isVisualOccurrence) : [],
     occurrences: database.prepare('SELECT * FROM episode_occurrences WHERE episode_id = ? ORDER BY source_start, kind, id').all(episodeId) };
 }
 export function resourceChoices(database, projectId, kind) {
@@ -56,11 +57,11 @@ function enrich(database, projectId, episodeId, occurrences) {
     if (old && matches.filter(match => match.old?.id === old.id).length > 1) { old = null; ambiguous = true; }
     const column = item.kind === 'character' ? 'character_id' : 'scene_id';
     // shortcut: 无法唯一对齐的改写只保留旧记录并要求核对，不做模糊自动归并。
-    const priorIds = [...new Set(previous.filter(row => row.kind === item.kind && row.source_name === item.name && !row.ignored && row[column] !== null).map(row => row[column]))];
+    const priorIds = [...new Set(previous.filter(row => isVisualOccurrence(row) && row.kind === item.kind && row.source_name === item.name && !row.ignored && row[column] !== null).map(row => row[column]))];
     const named = choices[item.kind].filter(row => row.name.trim().toLowerCase() === item.name.trim().toLowerCase());
     const suggestedId = ambiguous ? null : old ? old[column] : priorIds.length === 1 ? priorIds[0] : priorIds.length === 0 && named.length === 1 ? named[0].id : null;
     return { ...item, ...(old ? anchors.get(old.id) : null), occurrenceId: old?.id ?? null, needsReview: ambiguous, suggestedId: choices[item.kind].some(row => row.id === suggestedId) ? suggestedId : null,
-      ignored: !!old?.ignored, mode: old?.mode ?? item.mode, details: old?.details ?? item.details };
+      ignored: !!old?.ignored, mode: old && isVisualOccurrence(old) ? old.mode : item.mode, details: old?.details ?? item.details };
   });
 }
 export async function extractEpisodeResources(database, projectId, episodeId, form) {
@@ -85,18 +86,22 @@ export async function extractEpisodeResources(database, projectId, episodeId, fo
       if (response?.choices?.[0]?.finish_reason && response.choices[0].finish_reason !== 'stop') throw new Error('输出未正常结束');
       parsed = JSON.parse(raw.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i, '$1'));
       if (!parsed || !Array.isArray(parsed.occurrences) || parsed.occurrences.length > 200) throw new Error('出现记录格式或数量无效');
-      const keys = new Set();
+      const keys = new Map();
       candidates = parsed.occurrences.map(item => {
         if (!item || !Object.hasOwn(tables, item.kind)) throw new Error('资源类型无效');
+        if (['off_screen', 'inner_voice', 'mentioned'].includes(item.mode)) return null;
         const clean = { kind: item.kind };
         for (const [key, max] of Object.entries({ name: 80, description: 1000, sceneHeading: 300, quote: 1000, details: 1000 })) clean[key] = text(safeModelText(config, text(item[key], max, ['name', 'quote'].includes(key))), max, ['name', 'quote'].includes(key));
         clean.name = clean.name.trim(); clean.mode = mode(clean.kind, item.mode);
         if (!draft.script.includes(clean.name)) throw new Error('资源名称不在剧本中');
         clean.sourceStart = locate(draft.script, clean.quote, clean.sceneHeading);
         const key = JSON.stringify([clean.kind, clean.name, clean.quote]);
-        if (keys.has(key)) throw new Error('重复出现记录');
-        keys.add(key); return clean;
-      });
+        if (keys.has(key)) {
+          if (JSON.stringify(keys.get(key)) !== JSON.stringify(clean)) throw new Error('重复位置的资料有冲突');
+          return null;
+        }
+        keys.set(key, clean); return clean;
+      }).filter(Boolean);
     } catch {
       reject(502, '提取结果格式、原文定位或数量不合格，已有资源和出场记录不变；可复制返回文本，没有自动重试。', { recoveryText });
     }
@@ -106,6 +111,8 @@ export async function extractEpisodeResources(database, projectId, episodeId, fo
         const current = readEpisodeScript(database, episodeId);
         if (current.revision !== draft.revision || current.script !== draft.script || readEpisodeResources(database, episodeId).revision !== batch.revision) reject(409, '提取期间剧本或关联已变化，结果未覆盖；请保留返回文本。', { recoveryText });
         candidates = enrich(database, projectId, episodeId, candidates);
+        const found = new Set(candidates.map(item => item.occurrenceId));
+        for (const row of batch.occurrences) if (!row.ignored && !row.needs_review && !found.has(row.id)) database.prepare('UPDATE episode_occurrences SET needs_review = 1, revision = revision + 1 WHERE id = ? AND episode_id = ?').run(row.id, episodeId);
         database.prepare(`INSERT INTO episode_extractions (episode_id, script_revision, revision, candidates) VALUES (?, ?, ?, ?)
           ON CONFLICT(episode_id) DO UPDATE SET script_revision = excluded.script_revision, revision = excluded.revision, candidates = excluded.candidates`).run(episodeId, draft.revision, batch.revision + 1, JSON.stringify(candidates));
       });
@@ -156,8 +163,8 @@ export function confirmEpisodeResources(database, projectId, episodeId, form) {
     const created = new Map();
     batch.candidates.forEach((candidate, index) => {
       const selection = selections[index];
-      const id = selectResource(database, projectId, candidate.kind, selection, created);
       const chosenMode = mode(candidate.kind, selection.mode);
+      const id = selectResource(database, projectId, candidate.kind, selection, created);
       const details = text(selection.details, 1000);
       const start = locate(draft.script, candidate.quote, candidate.sceneHeading);
       const characterId = candidate.kind === 'character' ? id : null;
@@ -165,14 +172,14 @@ export function confirmEpisodeResources(database, projectId, episodeId, form) {
       const values = [characterId, sceneId, candidate.name, candidate.sceneHeading, candidate.quote, start, chosenMode, details, scriptRevision, selection.action === 'ignore' ? 1 : 0];
       if (candidate.occurrenceId) {
         const result = database.prepare(`UPDATE episode_occurrences SET character_id = ?, scene_id = ?, source_name = ?, scene_heading = ?, quote = ?, source_start = ?, mode = ?, details = ?,
-          script_revision = ?, ignored = ?, revision = revision + 1 WHERE id = ? AND episode_id = ? AND kind = ?`).run(...values, candidate.occurrenceId, episodeId, candidate.kind);
+          script_revision = ?, ignored = ?, needs_review = 0, revision = revision + 1 WHERE id = ? AND episode_id = ? AND kind = ?`).run(...values, candidate.occurrenceId, episodeId, candidate.kind);
         if (result.changes !== 1) reject(409, '原出场记录已变化，请刷新核对；本次确认未保存。');
       } else {
         database.prepare(`INSERT INTO episode_occurrences (episode_id, kind, character_id, scene_id, source_name, scene_heading, quote, source_start, mode, details, script_revision, ignored)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
           ON CONFLICT(episode_id, kind, source_name, quote) DO UPDATE SET character_id = excluded.character_id, scene_id = excluded.scene_id,
           scene_heading = excluded.scene_heading, source_start = excluded.source_start, mode = excluded.mode, details = excluded.details,
-          script_revision = excluded.script_revision, ignored = excluded.ignored, revision = episode_occurrences.revision + 1`).run(episodeId, candidate.kind, ...values);
+          script_revision = excluded.script_revision, ignored = excluded.ignored, needs_review = 0, revision = episode_occurrences.revision + 1`).run(episodeId, candidate.kind, ...values);
       }
     });
     database.prepare("UPDATE episode_extractions SET candidates = '[]', revision = revision + 1 WHERE episode_id = ?").run(episodeId);
@@ -196,7 +203,7 @@ export function updateEpisodeOccurrence(database, projectId, episodeId, occurren
     const quote = ignored ? row.quote : text(selection.quote, 1000, true);
     const start = ignored ? row.source_start : locate(draft.script, quote, heading);
     database.prepare(`UPDATE episode_occurrences SET character_id = ?, scene_id = ?, scene_heading = ?, quote = ?, source_start = ?, mode = ?, details = ?,
-      script_revision = ?, ignored = ?, revision = revision + 1 WHERE id = ?`).run(row.kind === 'character' ? id : null, row.kind === 'scene' ? id : null,
+      script_revision = ?, ignored = ?, needs_review = 0, revision = revision + 1 WHERE id = ?`).run(row.kind === 'character' ? id : null, row.kind === 'scene' ? id : null,
       heading, quote, start, mode(row.kind, selection.mode), text(selection.details, 1000), ignored ? row.script_revision : scriptRevision, ignored ? 1 : 0, occurrenceId);
     const batch = readEpisodeResources(database, episodeId);
     database.prepare('UPDATE episode_extractions SET revision = revision + 1, candidates = ? WHERE episode_id = ?').run(JSON.stringify(enrich(database, projectId, episodeId, batch.candidates)), episodeId);

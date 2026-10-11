@@ -447,7 +447,7 @@ test('版本 7 升级保留旧图片，默认不清空；升级失败回滚，�
     assert.deepEqual(database.prepare('SELECT * FROM character_boards').get(), original);
     database.close();
     database = openDatabase(filename);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 12);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 13);
     assert.deepEqual({ ...database.prepare('SELECT * FROM character_boards').get() }, { ...original, cleared: 0, reference_id: null });
     database.exec('UPDATE character_boards SET cleared = 1');
     database.close();
@@ -475,7 +475,7 @@ test('版本 6 升级保留所有项目、角色和 API；迁移失败完整回�
     assert.equal(database.prepare("SELECT name FROM sqlite_master WHERE name = 'character_boards'").get(), undefined);
     database.close();
     database = openDatabase(filename);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 12);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 13);
     assert.deepEqual(['projects', 'characters', 'api_configs'].map(table => database.prepare(`SELECT * FROM ${table}`).all()), original);
     assert.equal(database.prepare('SELECT count(*) AS count FROM character_boards').get().count, 0);
   } finally { t.mock.restoreAll(); database?.close(); await rm(directory, { recursive: true, force: true }); }

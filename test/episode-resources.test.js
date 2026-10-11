@@ -10,13 +10,13 @@ import { openDatabase } from '../src/database.js';
 import { readEpisodeResources } from '../src/episode-resources.js';
 import { extractResourcesPrompt } from '../prompts/script/extract-resources.js';
 
-const screenplay = '1-1 房间 内 日\n画面/动作：林秋站在门口。\n台词：林秋：“回来啦。”\n1-2 房间 内 夜\n画面/动作：林秋看向空椅。\n旁白：林秋回忆周远。';
+const screenplay = '1-1 房间 内 日\n画面/动作：林秋站在门口。\n台词：林秋：“回来啦。”\n1-2 房间 内 夜\n画面/动作：林秋看向空椅。\n画面/动作：回忆中，周远坐在空椅上。';
 const items = [
   { kind: 'character', name: '林秋', description: '', sceneHeading: '1-1 房间 内 日', quote: '画面/动作：林秋站在门口。', mode: 'on_screen', details: '' },
   { kind: 'scene', name: '房间', description: '有门和椅子。', sceneHeading: '1-1 房间 内 日', quote: '1-1 房间 内 日', mode: 'on_screen', details: '室内，白天。' },
   { kind: 'character', name: '林秋', description: '', sceneHeading: '1-2 房间 内 夜', quote: '画面/动作：林秋看向空椅。', mode: 'on_screen', details: '' },
   { kind: 'scene', name: '房间', description: '有门和椅子。', sceneHeading: '1-2 房间 内 夜', quote: '1-2 房间 内 夜', mode: 'on_screen', details: '室内，夜晚。' },
-  { kind: 'character', name: '周远', description: '', sceneHeading: '1-2 房间 内 夜', quote: '旁白：林秋回忆周远。', mode: 'memory', details: '只在回忆里出现。' },
+  { kind: 'character', name: '周远', description: '', sceneHeading: '1-2 房间 内 夜', quote: '画面/动作：回忆中，周远坐在空椅上。', mode: 'memory', details: '只在回忆里出现。' },
 ];
 async function listen(server) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
@@ -95,6 +95,78 @@ test('确认已有资源只关联不改资料；同地点在不同场和不同�
   assert.match(character, /#occurrence-\d+/); assert.doesNotMatch(character, /外部角色/);
   const scene = await (await fetch(f.url + '/projects/1?resource=scenes&scene=1')).text(); assert.match(scene, /全剧出现位置 · 4 处/);
   assert.match(scene, /室内，白天/); assert.match(scene, /室内，夜晚/); assert.match(scene, /场景图片生成尚未接入/);
+});
+
+test('实际出场按资源归组，同人物和地点只列一次，各场证据与关联保留；同名不同资源不合并', async t => {
+  const f = await fixture(t); await extracted(f);
+  let html = await (await fetch(f.url + '/projects/1?view=episode&episode=1')).text();
+  assert.match(html, /待确认的提取草稿 · 3 项资源 · 5 处画面出场/);
+  assert.equal((html.match(/<legend>角色 · 林秋 · 2 处<\/legend>/g) ?? []).length, 1);
+  assert.equal((html.match(/<legend>场景 · 房间 · 2 处<\/legend>/g) ?? []).length, 1);
+  assert.deepEqual([...html.matchAll(/data-candidate-index="(\d+)"/g)].map(match => Number(match[1])), [0, 2, 1, 3, 4]);
+  assert.equal((await f.confirm()).status, 200);
+  html = await (await fetch(f.url + '/projects/1?view=episode&episode=1')).text();
+  assert.match(html, /已确认人物与场景 · 3 项资源 · 5 处画面出场/);
+  assert.equal((html.match(/<legend>角色 · 林秋 · 2 处<\/legend>/g) ?? []).length, 1);
+  assert.equal(f.state().occurrences.length, 5);
+  const id = Number(f.db.prepare("INSERT INTO characters (project_id, name) VALUES (1, '林秋')").run().lastInsertRowid);
+  const row = f.state().occurrences.find(item => item.quote === items[2].quote);
+  assert.equal((await update(f, row, existing(id, '林秋', row))).status, 200);
+  html = await (await fetch(f.url + '/projects/1?view=episode&episode=1')).text();
+  assert.match(html, /已确认人物与场景 · 4 项资源 · 5 处画面出场/);
+  assert.equal((html.match(/<legend>角色 · 林秋 · 1 处<\/legend>/g) ?? []).length, 2);
+});
+
+test('同一位置的重复模型输出只保留一次，仅提及、纯声音和未呈现地点不入草稿，不创建档案', async t => {
+  const f = await fixture(t); const before = snapshots(f.db);
+  f.result({ choices: [{ message: { content: JSON.stringify({ occurrences: [...items, items[0], items[3],
+    { ...items[0], name: '仅提到的人', mode: 'mentioned' }, { ...items[0], name: '未出镜电话者', mode: 'off_screen' },
+    { ...items[0], name: '只有心声', mode: 'inner_voice' }, { ...items[1], name: '只谈到的地点', mode: 'mentioned' }] }) }, finish_reason: 'stop' }] });
+  await extracted(f); assert.equal(f.state().candidates.length, 5); assert.deepEqual(snapshots(f.db), before);
+  assert.equal((await f.confirm()).status, 200); assert.equal(f.state().occurrences.length, 5);
+  assert.equal(f.db.prepare('SELECT count(*) AS n FROM characters WHERE project_id = 1').get().n, 2);
+  assert.equal(f.db.prepare('SELECT count(*) AS n FROM scenes WHERE project_id = 1').get().n, 1);
+  const confirmed = snapshots(f.db);
+  f.result({ choices: [{ message: { content: JSON.stringify({ occurrences: [{ ...items[0], mode: 'mentioned' }, { ...items[1], mode: 'mentioned' }] }) }, finish_reason: 'stop' }] });
+  await extracted(f); assert.equal(f.state().candidates.length, 0);
+  assert.deepEqual(snapshots(f.db).characters, confirmed.characters); assert.deepEqual(snapshots(f.db).scenes, confirmed.scenes);
+  assert.equal(f.state().occurrences.length, 5); assert.ok(f.state().occurrences.every(row => row.needs_review === 1));
+  assert.deepEqual(f.state().occurrences.map(row => row.id).sort(), confirmed.occurrences.map(row => row.id).sort());
+  const html = await (await fetch(f.url + '/projects/1?view=episode&episode=1')).text();
+  assert.match(html, /已确认人物与场景 · 0 项资源 · 0 处画面出场/); assert.match(html, /本次提取未发现，待核对/);
+  assert.equal(f.requests.length, 2);
+});
+
+test('旧草稿及已保存的非画面引用不再显示或计入出现位置，旧档案和历史记录保留；不能确认新非画面关联', async t => {
+  const f = await fixture(t); await extracted(f); await f.confirm(); await extracted(f);
+  const raw = f.state().candidates;
+  f.db.prepare('UPDATE episode_extractions SET candidates = ? WHERE episode_id = 1').run(JSON.stringify([...raw, { ...raw[0], name: 'OLD_NONVISUAL_CANDIDATE', mode: 'mentioned' }]));
+  for (const mode of ['mentioned', 'off_screen', 'inner_voice']) f.db.prepare(`INSERT INTO episode_occurrences (episode_id, kind, character_id, source_name, scene_heading, quote, source_start, mode, details, script_revision)
+    VALUES (1, 'character', 1, 'OLD_NONVISUAL_RESOURCE', '', ?, 0, ?, '', 1)`).run('OLD_NONVISUAL_' + mode, mode);
+  const before = snapshots(f.db); const persisted = f.db.prepare('SELECT candidates FROM episode_extractions WHERE episode_id = 1').get().candidates;
+  assert.equal(f.state().candidates.length, 5);
+  const html = await (await fetch(f.url + '/projects/1?view=episode&episode=1')).text();
+  assert.doesNotMatch(html, /OLD_NONVISUAL/); assert.match(html, /已确认人物与场景 · 3 项资源 · 5 处画面出场/);
+  const resource = await (await fetch(f.url + '/projects/1?resource=characters&character=1')).text();
+  assert.match(resource, /全剧出现位置 · 2 处/); assert.doesNotMatch(resource, /OLD_NONVISUAL/);
+  const choices = f.selections(); choices[0].mode = 'mentioned';
+  assert.equal((await f.confirm(choices)).status, 400); assert.deepEqual(snapshots(f.db), before);
+  assert.equal(f.db.prepare('SELECT candidates FROM episode_extractions WHERE episode_id = 1').get().candidates, persisted);
+  assert.equal(f.requests.length, 2);
+});
+
+test('旧版非画面记录的人工移除决定仍受保护：同位置改成画面出场时保留ID和说明，不恢复关联，不沿用非画面类型', async t => {
+  const f = await fixture(t); await extracted(f); await f.confirm();
+  const row = f.state().occurrences.find(item => item.quote === items[0].quote);
+  f.db.prepare("UPDATE episode_occurrences SET mode = 'off_screen', ignored = 1, character_id = NULL, details = '旧版人工移除。' WHERE id = ?").run(row.id);
+  await extracted(f);
+  const candidate = f.state().candidates.find(item => item.quote === row.quote);
+  assert.equal(candidate.occurrenceId, row.id); assert.equal(candidate.ignored, true); assert.equal(candidate.suggestedId, null);
+  assert.equal(candidate.details, '旧版人工移除。'); assert.equal(candidate.mode, 'on_screen');
+  assert.equal((await f.confirm()).status, 200);
+  const kept = f.state().occurrences.find(item => item.id === row.id);
+  assert.equal(kept.ignored, 1); assert.equal(kept.character_id, null); assert.equal(kept.details, '旧版人工移除。'); assert.equal(kept.mode, 'on_screen');
+  assert.equal(f.state().occurrences.length, 5);
 });
 
 test('同批确认的同类同名新资源只建一次，描述不一致或已有同名新建不默默覆盖', async t => {
@@ -217,7 +289,7 @@ test('可以修正出场位置，但原文必须唯一存在；旧记录版本�
   assert.equal((await update(f, row, chosen, { revision: '999' })).status, 409);
   assert.equal((await f.post({ revision: '1', scriptRevision: '1', selection: JSON.stringify(chosen) }, `resource-occurrences/${row.id}`, 2)).status, 404);
   assert.equal((await update(f, row, { ...chosen, resourceId: 2, resourceName: '外部角色' })).status, 404);
-  const corrected = { ...chosen, quote: '台词：林秋：“回来啦。”', sceneHeading: '1-1 房间 内 日', mode: 'mentioned' };
+  const corrected = { ...chosen, quote: '台词：林秋：“回来啦。”', sceneHeading: '1-1 房间 内 日', mode: 'on_screen' };
   assert.equal((await update(f, row, corrected)).status, 200);
   assert.equal(f.state().occurrences.find(item => item.id === row.id).quote, corrected.quote);
 });
@@ -246,7 +318,7 @@ test('付费前验证版本、正文、配置和确认；跨项目、跨站、�
   assert.equal((await f.post({ ...f.fields(), replaceConfirmed: 'no' })).status, 400); assert.equal(f.requests.length, count);
 });
 
-test('无效 JSON、截断、空任务、错误原文定位、重复或过多记录都拒绝，保留旧数据与恢复文本，不重试或泄漏密钥', async t => {
+test('无效 JSON、截断、空任务、错误原文定位、冲突或过多记录都拒绝，保留旧数据与恢复文本，不重试或泄漏密钥', async t => {
   const f = await fixture(t); await extracted(f); await f.confirm(); const old = snapshots(f.db); const state = f.state();
   const result = value => ({ choices: [{ message: { content: JSON.stringify(value) }, finish_reason: 'stop' }] });
   for (const value of [
@@ -255,9 +327,9 @@ test('无效 JSON、截断、空任务、错误原文定位、重复或过多记
     { choices: [{ message: { content: JSON.stringify({ occurrences: items }) }, finish_reason: 'length' }] },
     result({ occurrences: [{ ...items[0], quote: '幻觉原文' }] }), result({ occurrences: [{ ...items[0], quote: '林秋' }] }),
     result({ occurrences: [{ ...items[0], name: '不存在的人物' }] }),
-    result({ occurrences: [{ ...items[0], sceneHeading: '不存在的标题' }] }), result({ occurrences: [items[0], items[0]] }),
+    result({ occurrences: [{ ...items[0], sceneHeading: '不存在的标题' }] }), result({ occurrences: [items[0], { ...items[0], mode: 'memory' }] }),
     result({ occurrences: Array(201).fill(items[0]) }), result({ occurrences: [{ ...items[0], kind: '__proto__' }] }),
-    result({ occurrences: [{ ...items[1], mode: 'inner_voice' }] }), result({ occurrences: [{ ...items[0], description: '字'.repeat(1001) }] }),
+    result({ occurrences: [{ ...items[1], mode: 'unsupported' }] }), result({ occurrences: [{ ...items[0], description: '字'.repeat(1001) }] }),
   ]) {
     f.result(value); const count = f.requests.length; const response = await f.post(f.fields()); assert.equal(response.status, 502);
     const error = await response.json(); assert.ok(!JSON.stringify(error).includes('extract-secret'));
@@ -344,6 +416,44 @@ test('提取提示词只分析本集正文、要求原文证据与真实姓名�
   assert.doesNotMatch(extractResourcesPrompt, /林秋|房间|路明非|表白/);
 });
 
+test('同版剧本重新提取也将未发现的旧位置留待核对，确认不恢复旧项，人工核对可恢复；保存草稿失败回滚标记', async t => {
+  const f = await fixture(t); await extracted(f); await f.confirm();
+  const old = snapshots(f.db); const batch = f.state();
+  const response = { choices: [{ message: { content: JSON.stringify({ occurrences: items.slice(0, 4) }) }, finish_reason: 'stop' }] };
+  f.result(response);
+  f.db.exec("CREATE TEMP TRIGGER fail_filter BEFORE UPDATE ON episode_extractions BEGIN SELECT RAISE(ABORT, 'filter storage failure'); END");
+  const failed = await f.post(f.fields()); assert.equal(failed.status, 502); assert.ok((await failed.json()).recoveryText);
+  assert.deepEqual(snapshots(f.db), old); assert.deepEqual(f.state(), batch);
+  f.db.exec('DROP TRIGGER fail_filter'); await extracted(f); assert.equal((await f.confirm()).status, 200);
+  let missing = f.state().occurrences.find(row => row.source_name === '周远');
+  assert.equal(missing.needs_review, 1); assert.ok(missing.character_id);
+  let html = await (await fetch(f.url + '/projects/1?view=episode&episode=1')).text();
+  assert.match(html, /已确认人物与场景 · 2 项资源 · 4 处画面出场/); assert.match(html, /待核对／已移除记录 · 1 处/);
+  assert.equal((await update(f, missing, existing(missing.character_id, '周远', missing))).status, 200);
+  missing = f.state().occurrences.find(row => row.id === missing.id); assert.equal(missing.needs_review, 0);
+  html = await (await fetch(f.url + '/projects/1?view=episode&episode=1')).text();
+  assert.match(html, /已确认人物与场景 · 3 项资源 · 5 处画面出场/);
+});
+
+test('版本12升级增加待核对标记而不改变旧关联／档案，失败完整回滚，重复打开保留标记', async t => {
+  const directory = await mkdtemp(join(tmpdir(), 'ironweave-visible-migration-')); t.after(() => rm(directory, { recursive: true, force: true }));
+  const filename = join(directory, 'drama.sqlite'); const f = await fixture(t, filename); await extracted(f); await f.confirm();
+  f.db.exec('ALTER TABLE episode_occurrences DROP COLUMN needs_review; PRAGMA user_version = 12');
+  const original = snapshots(f.db); const draft = f.state(); await f.close();
+  const exec = DatabaseSync.prototype.exec;
+  t.mock.method(DatabaseSync.prototype, 'exec', function(sql) { const result = exec.call(this, sql); if (sql.includes('PRAGMA user_version = 13')) throw new Error('review migration failure'); return result; });
+  assert.throws(() => openDatabase(filename), /review migration failure/); t.mock.restoreAll();
+  let db = new DatabaseSync(filename); assert.equal(db.prepare('PRAGMA user_version').get().user_version, 12);
+  assert.deepEqual(snapshots(db), original); assert.deepEqual(readEpisodeResources(db, 1), draft);
+  assert.ok(!db.prepare('PRAGMA table_info(episode_occurrences)').all().some(row => row.name === 'needs_review')); db.close();
+  db = openDatabase(filename); assert.equal(db.prepare('PRAGMA user_version').get().user_version, 13);
+  const upgraded = snapshots(db); assert.deepEqual(upgraded.characters, original.characters); assert.deepEqual(upgraded.scenes, original.scenes);
+  assert.deepEqual(upgraded.occurrences.map(({ needs_review, ...row }) => row), original.occurrences.map(row => ({ ...row })));
+  assert.ok(upgraded.occurrences.every(row => row.needs_review === 0)); assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
+  const id = upgraded.occurrences[0].id; db.prepare('UPDATE episode_occurrences SET needs_review = 1 WHERE id = ?').run(id);
+  db.close(); db = openDatabase(filename); assert.equal(db.prepare('SELECT needs_review FROM episode_occurrences WHERE id = ?').get(id).needs_review, 1); db.close();
+});
+
 test('新资源、候选、人工关联和移除状态重启后保留，版本11升级失败整组回滚并保留旧表数据', async t => {
   const directory = await mkdtemp(join(tmpdir(), 'ironweave-resources-')); t.after(() => rm(directory, { recursive: true, force: true }));
   const filename = join(directory, 'drama.sqlite'); const f = await fixture(t, filename); await extracted(f); await f.confirm();
@@ -359,5 +469,5 @@ test('新资源、候选、人工关联和移除状态重启后保留，版本11
   t.mock.method(DatabaseSync.prototype, 'exec', function(sql) { const result = exec.call(this, sql); if (sql.includes('PRAGMA user_version = 12')) throw new Error('resource migration failure'); return result; });
   assert.throws(() => openDatabase(filename), /resource migration failure/); t.mock.restoreAll();
   db = new DatabaseSync(filename); assert.equal(db.prepare('PRAGMA user_version').get().user_version, 11); assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'scenes'").get(), undefined); assert.deepEqual(db.prepare('SELECT * FROM characters').all(), oldCharacters); assert.deepEqual(db.prepare('SELECT * FROM episode_scripts').all(), oldScripts); db.close();
-  db = openDatabase(filename); assert.equal(db.prepare('PRAGMA user_version').get().user_version, 12); assert.deepEqual(db.prepare('SELECT * FROM characters').all(), oldCharacters); assert.deepEqual(db.prepare('SELECT * FROM episode_scripts').all(), oldScripts); assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []); db.close();
+  db = openDatabase(filename); assert.equal(db.prepare('PRAGMA user_version').get().user_version, 13); assert.deepEqual(db.prepare('SELECT * FROM characters').all(), oldCharacters); assert.deepEqual(db.prepare('SELECT * FROM episode_scripts').all(), oldScripts); assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []); db.close();
 });
