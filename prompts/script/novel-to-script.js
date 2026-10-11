@@ -11,6 +11,16 @@ ADAPTATION METHOD:
 - Reasonable nonessential scene details are allowed. Explain significant cuts, additions, and restructuring in notes. Obvious spelling errors in a character's name may be normalized and explained; do not merge identities when it is unclear whether they refer to the same person.
 - Do not impose a scene count or fixed word count. Do not plan duration, episode divisions, storyboards, shot sizes, camera positions, camera movement, or image/video generation prompts.
 
+SCENE CLARITY:
+Every scene must be understandable and actable without consulting the novel. Make clear where and when it happens, who is present, what they are doing, and how the action unfolds.
+- Open with a brief description establishing the relevant environment and the characters' current activity and positions. Include what the audience needs to see or hear, not a generic scenery paragraph.
+- On a character's first appearance, give a concise introduction using relevant identity, visible traits, or behavior. Do not write a full biography, force an age, or invent unsupported biographical facts.
+- Write concise action paragraphs in the present tense. Show who acts, speaks, and responds. Keep necessary entrances, exits, prop locations, and changes of state coherent; omit routine movements that add nothing.
+- Place necessary delivery, pauses, or performance cues beside the relevant dialogue or in the action. Describe playable behavior rather than explaining what the actor or audience should think.
+- Identify the source and narrative status of important sounds. Distinguish speech from someone off-screen in the current situation, voiceover or internal speech, and remembered speech. Place music, sound effects, and written messages where they occur and only when useful.
+- Make entry into and exit from a flashback, imagined situation, or fantasy explicit, including the return to the actual scene. Write necessary narrative connections in the body, without shot-by-shot camera instructions.
+These descriptions belong naturally in the screenplay body, not separate scene-goal or scene-purpose analysis sections. Do not force music, sound effects, narration, or lengthy explanations into every scene. Do not repeat established information unless it changes or is needed to understand the scene.
+
 SCREENPLAY FORMAT:
 Start with the standard Chinese heading for Episode N, using episodeNumber and a Chinese ordinal. Follow it with the source title in Chinese book-title brackets, removing the original chapter-number prefix. If the source has no title, use only the episode heading.
 Number scenes as episodeNumber-sceneNumber: episode 1 uses 1-1, 1-2, 1-3; episode 2 uses 2-1, 2-2.
@@ -20,10 +30,14 @@ The following layout uses English placeholders only to describe the structure. R
 Characters: Only people physically present in this scene
 Voices: List remembered or off-screen voices separately, when present
 
-Specific, actable action paragraphs.
+Brief opening action establishing the relevant setting, sounds, and the characters' current positions and activity.
 
-Character name (necessary performance cue)
+Specific, actable actions and interactions.
+
+Character name (necessary performance or delivery cue)
 Dialogue.
+
+Further action, responses, or a necessary sound or narrative transition, placed where it happens.
 
 Separate action and dialogue with line breaks. Divide scenes according to the adapted setting and time. Clearly distinguish flashbacks, imagined situations, fantasies, and the return to reality. Do not list a remembered voice as a person physically present.
 Distinguish spoken dialogue, rehearsal, internal speech, and written messages. Label messages that remain written with the Chinese equivalent of 'On-screen message'.

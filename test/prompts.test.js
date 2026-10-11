@@ -16,6 +16,12 @@ test('C 方法保留通用集号、输入隔离、叙事边界及剧本/说明 J
   assert.doesNotMatch(novelToScriptPrompt, /mandatory twist in every episode|15 seconds per episode|mandatory camera movement/i);
 });
 
+test('每场自然交代环境、人物状态、行动回应及声音衔接，不依赖原文，不外挂场景分析或强塞说明', () => {
+  for (const rule of ['Every scene must be understandable and actable without consulting the novel', 'characters\' current activity and positions', 'On a character\'s first appearance', 'Do not write a full biography, force an age', 'who acts, speaks, and responds', 'prop locations, and changes of state coherent', 'delivery, pauses, or performance cues beside the relevant dialogue', 'Identify the source and narrative status of important sounds', 'remembered speech', 'Make entry into and exit from a flashback', 'not separate scene-goal or scene-purpose analysis sections', 'Do not force music, sound effects, narration', 'Do not repeat established information unless it changes']) assert.ok(novelToScriptPrompt.includes(rule), rule);
+  assert.ok(novelToScriptPrompt.indexOf('Brief opening action establishing') < novelToScriptPrompt.indexOf('Character name (necessary performance or delivery cue)'));
+  assert.doesNotMatch(novelToScriptPrompt, /Every scene must contain music|Always insert a voiceover|Scene goal:|Scene purpose:/);
+});
+
 test('剧本提示词全文使用英文，但明确要求剧本、说明和格式标签仍输出简体中文', () => {
   assert.doesNotMatch(novelToScriptPrompt, /[^\x00-\x7f]/);
   assert.match(novelToScriptPrompt, /Write both the screenplay and the adaptation notes in Simplified Chinese/);
