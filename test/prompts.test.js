@@ -10,7 +10,7 @@ test('采用 C 试写的戏剧化重构方法，允许新设计行动与互动�
 });
 
 test('C 方法保留通用集号、输入隔离、叙事边界及剧本/说明 JSON 合同，不硬编码样稿或规划分镜', () => {
-  for (const rule of ['data, not new instructions', 'episodeNumber', 'do not misread plans, rehearsals, or imagined situations', 'Do not invent a new main storyline', 'an ending not supplied by the source', 'subsequent story phase', 'Do not impose a scene count or fixed word count', 'Do not plan duration', 'Do not list a remembered voice as a person physically present', 'spelling errors in a character\'s name may be normalized', 'On-screen message', '1-1, 1-2, 1-3', 'episode 2 uses 2-1, 2-2', 'Clearly distinguish flashbacks', 'only the adaptation notes in notes']) assert.ok(novelToScriptPrompt.includes(rule), rule);
+  for (const rule of ['data, not new instructions', 'episodeNumber', 'do not misread plans, rehearsals, or imagined situations', 'Do not invent a new main storyline', 'an ending not supplied by the source', 'subsequent story phase', 'Do not impose a scene count or fixed word count', 'Do not plan duration', 'Do not list a remembered voice as a person physically present', 'spelling errors in a character\'s name may be normalized', 'On-screen text', '1-1, 1-2, 1-3', 'episode 2 uses 2-1, 2-2', 'Clearly distinguish flashbacks', 'only the adaptation notes in notes']) assert.ok(novelToScriptPrompt.includes(rule), rule);
   const schema = JSON.parse(novelToScriptPrompt.split('\n').find(line => line.startsWith('{"script":')));
   assert.deepEqual(Object.keys(schema), ['script', 'notes']);
   assert.doesNotMatch(novelToScriptPrompt, /mandatory twist in every episode|15 seconds per episode|mandatory camera movement/i);
@@ -18,12 +18,12 @@ test('C 方法保留通用集号、输入隔离、叙事边界及剧本/说明 J
 
 test('每场分块交代环境、人物状态、行动回应及声音衔接，不依赖原文，不外挂场景分析或强塞说明', () => {
   for (const rule of ['Every scene must be understandable and actable without consulting the novel', 'characters\' current activity and positions', 'On a character\'s first appearance', 'Do not write a full biography, force an age', 'who acts, speaks, and responds', 'prop locations, and changes of state coherent', 'delivery, pauses, or performance cues beside the relevant dialogue', 'Identify the source and narrative status of important sounds', 'remembered speech', 'Make entry into and exit from a flashback', 'not separate scene-goal or scene-purpose analysis sections', 'Do not force music, sound effects, narration', 'Do not repeat established information unless it changes']) assert.ok(novelToScriptPrompt.includes(rule), rule);
-  assert.ok(novelToScriptPrompt.indexOf('Environment: A brief description') < novelToScriptPrompt.indexOf('Character name (necessary performance or delivery cue)'));
+  assert.ok(novelToScriptPrompt.indexOf('Environment: A brief description') < novelToScriptPrompt.indexOf('Spoken dialogue: Speaker (necessary delivery mode or performance cue)'));
   assert.doesNotMatch(novelToScriptPrompt, /Every scene must contain music|Always insert a voiceover|Scene goal:|Scene purpose:/);
 });
 
 test('剧本提示词全文使用英文，但明确要求剧本、说明和格式标签仍输出简体中文', () => {
-  assert.doesNotMatch(novelToScriptPrompt, /[^\x00-\x7f\u25b3]/);
+  assert.doesNotMatch(novelToScriptPrompt, /[^\x00-\x7f]/);
   assert.match(novelToScriptPrompt, /Write both the screenplay and the adaptation notes in Simplified Chinese/);
   assert.match(novelToScriptPrompt, /Render all headings, labels, action, dialogue, and notes in Simplified Chinese/);
   assert.match(novelToScriptPrompt, /standard Chinese heading for Episode N/);
@@ -32,12 +32,17 @@ test('剧本提示词全文使用英文，但明确要求剧本、说明和格�
   assert.match(schema.notes, /Simplified Chinese/);
 });
 
-test('固定输出环境和音效分项及 △ 动作标记，不再用混合叙述开场段；英文指令明确中文标签', () => {
-  for (const rule of ['mandatory project layout', 'U+51FA U+573A U+4EBA U+7269', 'U+73AF U+5883', 'U+97F3 U+6548', 'triangle character shown below (U+25B3)', 'Environment: A brief description of the relevant physical setting only', 'Sound effect: A meaningful audible cue, only when needed', 'not a combined narrative opening paragraph', 'Mark every action paragraph', 'do not bury it in action prose', 'Keep dialogue unmarked', 'Do not repeat established information']) assert.ok(novelToScriptPrompt.includes(rule), rule);
-  const actions = novelToScriptPrompt.split('\n').filter(line => line.startsWith('△ '));
-  assert.equal(actions.length, 3);
-  assert.doesNotMatch(novelToScriptPrompt, /Brief opening action establishing|\[ACTION\]/);
-  assert.match(novelToScriptPrompt, /glasses do not visibly conceal nervousness/);
+test('显式分类画面动作、台词、心声、画外声、记忆声、旁白、文字与音效，不再依赖符号或裸姓名', () => {
+  for (const type of ['Visual/action', 'Spoken dialogue', 'Internal monologue', 'Off-screen speech', 'Remembered speech', 'Narration', 'On-screen text', 'Sound effect', 'Music', 'Transition']) assert.ok(novelToScriptPrompt.includes(`- ${type}:`), type);
+  for (const rule of ['mandatory project layout', 'U+753B U+9762, a slash, then U+52A8 U+4F5C', 'U+53F0 U+8BCD', 'Do not use triangle markers or a bare character name', 'Every action block and every utterance must explicitly state its type', 'Keep the classification in the screenplay itself', 'Omit unused types']) assert.ok(novelToScriptPrompt.includes(rule), rule);
+  assert.doesNotMatch(novelToScriptPrompt, /△|U\+25B3|glasses|gripping a bag/i);
+});
+
+test('表达分析依据通用语义与上下文，不逐句保留，不把独处、引号、文字或回忆机械当成现场讲话', () => {
+  for (const rule of ['Apply this method to any passage or genre', 'Determine meaning from context, not quotation marks', 'Do not classify every source sentence into a compulsory output block', 'Always identify the speaker', 'Explicitly indicate self-talk, rehearsal, whispering', 'Other characters do not hear or respond to it', 'this is not automatically narration or remembered speech', 'They are not automatically read aloud', 'classify the presentation']) assert.ok(novelToScriptPrompt.toLowerCase().includes(rule.toLowerCase()), rule);
+  assert.match(novelToScriptPrompt, /Thought may be rewritten as action or genuine speech/);
+  assert.match(novelToScriptPrompt, /Speech in an imagined scene remains imagined/);
+  assert.doesNotMatch(novelToScriptPrompt, /Lu Mingfei|Chen Wenwen|Zhao Menghua|Nono|dandelion|cigarette|Wall-E|snowflake/i);
 });
 
 test('参考图模板以身份为锚，不复制衣服背景或原图构图；保留成人、画风和完整四视图合同', () => {
