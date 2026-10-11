@@ -16,20 +16,28 @@ test('C 方法保留通用集号、输入隔离、叙事边界及剧本/说明 J
   assert.doesNotMatch(novelToScriptPrompt, /mandatory twist in every episode|15 seconds per episode|mandatory camera movement/i);
 });
 
-test('每场自然交代环境、人物状态、行动回应及声音衔接，不依赖原文，不外挂场景分析或强塞说明', () => {
+test('每场分块交代环境、人物状态、行动回应及声音衔接，不依赖原文，不外挂场景分析或强塞说明', () => {
   for (const rule of ['Every scene must be understandable and actable without consulting the novel', 'characters\' current activity and positions', 'On a character\'s first appearance', 'Do not write a full biography, force an age', 'who acts, speaks, and responds', 'prop locations, and changes of state coherent', 'delivery, pauses, or performance cues beside the relevant dialogue', 'Identify the source and narrative status of important sounds', 'remembered speech', 'Make entry into and exit from a flashback', 'not separate scene-goal or scene-purpose analysis sections', 'Do not force music, sound effects, narration', 'Do not repeat established information unless it changes']) assert.ok(novelToScriptPrompt.includes(rule), rule);
-  assert.ok(novelToScriptPrompt.indexOf('Brief opening action establishing') < novelToScriptPrompt.indexOf('Character name (necessary performance or delivery cue)'));
+  assert.ok(novelToScriptPrompt.indexOf('Environment: A brief description') < novelToScriptPrompt.indexOf('Character name (necessary performance or delivery cue)'));
   assert.doesNotMatch(novelToScriptPrompt, /Every scene must contain music|Always insert a voiceover|Scene goal:|Scene purpose:/);
 });
 
 test('剧本提示词全文使用英文，但明确要求剧本、说明和格式标签仍输出简体中文', () => {
-  assert.doesNotMatch(novelToScriptPrompt, /[^\x00-\x7f]/);
+  assert.doesNotMatch(novelToScriptPrompt, /[^\x00-\x7f\u25b3]/);
   assert.match(novelToScriptPrompt, /Write both the screenplay and the adaptation notes in Simplified Chinese/);
   assert.match(novelToScriptPrompt, /Render all headings, labels, action, dialogue, and notes in Simplified Chinese/);
   assert.match(novelToScriptPrompt, /standard Chinese heading for Episode N/);
   const schema = JSON.parse(novelToScriptPrompt.split('\n').find(line => line.startsWith('{"script":')));
   assert.match(schema.script, /Simplified Chinese/);
   assert.match(schema.notes, /Simplified Chinese/);
+});
+
+test('固定输出环境和音效分项及 △ 动作标记，不再用混合叙述开场段；英文指令明确中文标签', () => {
+  for (const rule of ['mandatory project layout', 'U+51FA U+573A U+4EBA U+7269', 'U+73AF U+5883', 'U+97F3 U+6548', 'triangle character shown below (U+25B3)', 'Environment: A brief description of the relevant physical setting only', 'Sound effect: A meaningful audible cue, only when needed', 'not a combined narrative opening paragraph', 'Mark every action paragraph', 'do not bury it in action prose', 'Keep dialogue unmarked', 'Do not repeat established information']) assert.ok(novelToScriptPrompt.includes(rule), rule);
+  const actions = novelToScriptPrompt.split('\n').filter(line => line.startsWith('△ '));
+  assert.equal(actions.length, 3);
+  assert.doesNotMatch(novelToScriptPrompt, /Brief opening action establishing|\[ACTION\]/);
+  assert.match(novelToScriptPrompt, /glasses do not visibly conceal nervousness/);
 });
 
 test('参考图模板以身份为锚，不复制衣服背景或原图构图；保留成人、画风和完整四视图合同', () => {
