@@ -1,3 +1,9 @@
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
+import { createGunzip, createInflate, createBrotliDecompress } from 'node:zlib';
+
+const decompressors = new Map([['gzip', createGunzip], ['deflate', createInflate], ['br', createBrotliDecompress]]);
+
 function reject(message) {
   throw Object.assign(new Error(message), { status: 502 });
 }
@@ -10,7 +16,7 @@ export function imageMime(bytes) {
 
 export const safeModelText = (config, value) => String(value).replaceAll(config.apiKey, '[密钥已隐藏]').replaceAll(encodeURIComponent(config.apiKey), '[密钥已隐藏]');
 
-export async function callModel(config, endpoint, body, timeout = 180000) {
+export async function callModel(config, endpoint, body, timeout = config.type === 'llm' ? null : 180000) {
   const headers = { Authorization: `Bearer ${config.apiKey}` };
   if (!(body instanceof FormData)) {
     headers['Content-Type'] = 'application/json';
@@ -18,10 +24,30 @@ export async function callModel(config, endpoint, body, timeout = 180000) {
   }
   let response;
   let raw;
+  let request;
   try {
-    response = await fetch(config.baseUrl + endpoint, {
-      method: 'POST', headers, body, redirect: 'error', signal: AbortSignal.timeout(timeout),
-    });
+    if (timeout === null) {
+      const url = new URL(config.baseUrl + endpoint);
+      // 原生单次连接没有 fetch 的隐式响应超时，也不会跟随重定向或重试。
+      response = await new Promise((resolve, fail) => {
+        request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(url, {
+          method: 'POST', headers: { ...headers, 'Accept-Encoding': 'gzip, deflate, br' }, agent: false, timeout: 0,
+        }, incoming => {
+          const encoding = incoming.headers['content-encoding'];
+          const decode = decompressors.get(typeof encoding === 'string' ? encoding.trim().toLowerCase() : undefined);
+          const stream = decode ? incoming.pipe(decode()) : incoming;
+          if (decode) incoming.on('error', error => stream.destroy(error));
+          stream.on('error', fail);
+          resolve({ status: incoming.statusCode, ok: incoming.statusCode >= 200 && incoming.statusCode < 300, body: stream });
+        });
+        request.on('error', fail);
+        request.end(body);
+      });
+    } else {
+      response = await fetch(config.baseUrl + endpoint, {
+        method: 'POST', headers, body, redirect: 'error', signal: AbortSignal.timeout(timeout),
+      });
+    }
     let size = 0;
     const chunks = [];
     for await (const chunk of response.body) {
@@ -31,8 +57,9 @@ export async function callModel(config, endpoint, body, timeout = 180000) {
     }
     raw = Buffer.concat(chunks).toString('utf8');
   } catch (error) {
+    request?.destroy();
     if (error.status) throw error;
-    reject('模型调用失败或超时；请求可能已提交并计费，请先查看服务商记录。没有自动重试。');
+    reject(`${timeout === null ? '模型调用失败或连接中断' : '模型调用失败或超时'}；请求可能已提交并计费，请先查看服务商记录。没有自动重试。`);
   }
   let result;
   try { result = JSON.parse(raw); } catch { reject(`模型接口未返回有效 JSON（HTTP ${response.status}）。`); }

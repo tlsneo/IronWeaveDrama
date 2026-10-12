@@ -217,7 +217,7 @@ test('计费前拒绝旧版本／脚本／资源快照、非法最大时长和�
   assert.equal((await f.generate()).status, 200, 'explicit regeneration can replace stale plans');
 });
 
-test('一次非流式chat/completions调用，16384tokens／180秒，发送已保存本集剧本、上限和已确认资源元数据，生成草稿须人工核对', async t => {
+test('一次非流式chat/completions调用，16384tokens且不设本地主动超时，发送已保存本集剧本、上限和已确认资源元数据，生成草稿须人工核对', async t => {
   const f = await fixture(t), pixels = Buffer.from('PRIVATE_IMAGE_PIXELS');
   f.db.prepare("INSERT INTO character_references (character_id, image, mime, width, height) VALUES (1, ?, 'image/png', 16, 9)").run(pixels);
   f.db.prepare("INSERT INTO scene_images (scene_id, image, mime, width, height, valid, revision, model, prompt) VALUES (1, ?, 'image/png', 16, 9, 1, 'dummy-image-revision', 'dummy-model', 'PRIVATE_IMAGE_PROMPT')").run(pixels);
@@ -230,7 +230,7 @@ test('一次非流式chat/completions调用，16384tokens／180秒，发送已�
   assert.equal(f.requests.length, 1); const request = f.requests[0];
   assert.equal(request.path, '/v1/chat/completions'); assert.equal(request.authorization, 'Bearer synthetic-storyboard-token');
   assert.equal(request.body.model, 'storyboard-model'); assert.equal(request.body.stream, false); assert.equal(request.body.max_tokens, 16384);
-  assert.ok(timeouts.includes(180000)); assert.equal(request.body.messages.length, 2);
+  assert.deepEqual(timeouts, []); assert.equal(request.body.messages.length, 2);
   assert.equal(request.body.messages[0].role, 'system'); assert.equal(request.body.messages[0].content, episodeToShotsPrompt);
   assert.equal(request.body.messages[1].role, 'user'); const input = JSON.parse(request.body.messages[1].content);
   assert.deepEqual(input, { episodeNumber: 1, script, maxShotSeconds: 6, resources: f.resources() });
