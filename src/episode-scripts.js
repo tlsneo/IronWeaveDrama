@@ -21,7 +21,7 @@ export function readEpisodeScript(database, episodeId) {
 }
 
 export function assertEpisodeScriptsIdle(database, ids) {
-  if (ids.some(id => generating.get(database)?.has(id))) reject(409, '本集正在生成剧本或提取资源，请等待完成后再操作。');
+  if (ids.some(id => generating.get(database)?.has(id))) reject(409, '本集正在生成剧本、提取资源或设计分镜，请等待完成后再操作。');
 }
 
 export async function withEpisodeScriptLock(database, episodeId, action) {

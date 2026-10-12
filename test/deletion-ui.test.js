@@ -12,14 +12,15 @@ function page(fetch) {
   const error = { textContent: '' };
   const characterForm = { dataset: { dirty: 'true' } };
   const scriptForm = { dataset: { dirty: 'true' } }, scriptRecovery = { hidden: false };
+  const storyboardForm = { dataset: { dirty: 'true' } }, storyboardRecovery = { hidden: false };
   const sceneForm = { dataset: { dirty: 'true' } }, candidates = { dataset: { dirty: 'true' } }, occurrenceForm = { dataset: { dirty: 'true' } };
   const button = { disabled: false, textContent: '删除', dataset: { deleteUrl: '/projects/1/characters/2/delete', deleteName: '林秋', deleteMessage: '确定删除林秋？角色和图片将删除，无法恢复。' }, closest: () => main.inert ? main : null };
   runInNewContext(script, {
-    document: { getElementById: id => ({ 'delete-error': error, 'character-form': characterForm, 'scene-form': sceneForm, 'episode-script-form': scriptForm, 'episode-script-recovery': scriptRecovery, 'episode-resource-candidates': candidates })[id] ?? null, querySelector: () => main, querySelectorAll: () => [occurrenceForm], addEventListener: (event, handler) => { events[event] = handler; } },
+    document: { getElementById: id => ({ 'delete-error': error, 'character-form': characterForm, 'scene-form': sceneForm, 'episode-script-form': scriptForm, 'episode-script-recovery': scriptRecovery, 'episode-resource-candidates': candidates, 'storyboard-form': storyboardForm, 'storyboard-recovery': storyboardRecovery })[id] ?? null, querySelector: () => main, querySelectorAll: () => [occurrenceForm], addEventListener: (event, handler) => { events[event] = handler; } },
     window: { confirm(message) { confirmations.push(message); return confirmed; }, location: { assign: url => redirects.push(url) }, addEventListener: (event, handler) => { events[event] = handler; } },
     fetch, URLSearchParams, Error, TypeError,
   });
-  return { main, error, button, characterForm, scriptForm, scriptRecovery, sceneForm, candidates, occurrenceForm, redirects, confirmations, confirm(value) { confirmed = value; }, click: () => events.click({ target: { closest: () => button }, preventDefault() {} }), beforeUnload: event => events.beforeunload(event) };
+  return { main, error, button, characterForm, scriptForm, scriptRecovery, storyboardForm, storyboardRecovery, sceneForm, candidates, occurrenceForm, redirects, confirmations, confirm(value) { confirmed = value; }, click: () => events.click({ target: { closest: () => button }, preventDefault() {} }), beforeUnload: event => events.beforeunload(event) };
 }
 
 test('删除必须先确认，取消不发送请求；确认后显示删除中、防重复请求，成功只跳转一次且不再弹未保存提醒', async () => {
@@ -50,6 +51,8 @@ test('删除必须先确认，取消不发送请求；确认后显示删除中�
   assert.equal(p.characterForm.dataset.dirty, '');
   assert.equal(p.scriptForm.dataset.dirty, '');
   assert.equal(p.scriptRecovery.hidden, true);
+  assert.equal(p.storyboardForm.dataset.dirty, '');
+  assert.equal(p.storyboardRecovery.hidden, true);
   for (const form of [p.sceneForm, p.candidates, p.occurrenceForm]) assert.equal(form.dataset.dirty, '');
 });
 
@@ -60,6 +63,8 @@ test('删除失败保留页面与编辑输入，恢复按钮；网络失败只�
   assert.equal(p.characterForm.dataset.dirty, 'true');
   assert.equal(p.scriptForm.dataset.dirty, 'true');
   assert.equal(p.scriptRecovery.hidden, false);
+  assert.equal(p.storyboardForm.dataset.dirty, 'true');
+  assert.equal(p.storyboardRecovery.hidden, false);
   for (const form of [p.sceneForm, p.candidates, p.occurrenceForm]) assert.equal(form.dataset.dirty, 'true');
   assert.equal(p.button.disabled, false);
   assert.equal(p.button.textContent, '删除');

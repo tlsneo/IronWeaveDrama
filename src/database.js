@@ -269,6 +269,20 @@ export function openDatabase(filename) {
         PRAGMA user_version = 14;
       `);
     }
+    if (database.prepare('PRAGMA user_version').get().user_version < 15) {
+      database.exec(`
+        CREATE TABLE episode_storyboards (
+          episode_id INTEGER PRIMARY KEY REFERENCES episodes(id) ON DELETE CASCADE,
+          script_revision INTEGER NOT NULL CHECK (typeof(script_revision) = 'integer' AND script_revision >= 0),
+          revision INTEGER NOT NULL CHECK (typeof(revision) = 'integer' AND revision > 0),
+          max_shot_seconds INTEGER NOT NULL DEFAULT 5 CHECK (typeof(max_shot_seconds) = 'integer' AND max_shot_seconds BETWEEN 1 AND 15),
+          reviewed INTEGER NOT NULL DEFAULT 0 CHECK (reviewed IN (0, 1)),
+          resources_json TEXT NOT NULL,
+          shots TEXT NOT NULL DEFAULT '[]'
+        );
+        PRAGMA user_version = 15;
+      `);
+    }
     if (database.prepare('PRAGMA foreign_key_check').all().length) throw new Error('数据库关系检查失败，升级已回滚。');
     database.exec('COMMIT');
     database.exec('PRAGMA foreign_keys = ON');

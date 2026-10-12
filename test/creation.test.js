@@ -96,7 +96,7 @@ test('集在所属季内创建、改名、排序，剧本入口与分集入口�
   assert.doesNotMatch(html, /<!-- (?:PROJECT|WORKSPACE|RESOURCE|SEASONS|SCRIPTS|STORYBOARDS|CREATION)_/);
 });
 
-test('剧本与分镜使用独立页面和本集导航，旧剧本地址仍有效，分镜不加载剧本表单或模型配置', async t => {
+test('剧本与分镜使用独立页面和本集导航，旧剧本地址仍有效，分镜有独立表单和LLM选择但不加载剧本编辑表单', async t => {
   const f = await fixture(t);
   const p = await f.project();
   const episode = await saved(await f.post(`/projects/${p.id}/episodes`, { name: '开场', seasonId: p.season.id }));
@@ -109,13 +109,15 @@ test('剧本与分镜使用独立页面和本集导航，旧剧本地址仍有�
   assert.doesNotMatch(script, /还没有分镜|episode-shots-title|episode-workspace/);
   assert.match(script, /href="\?view=scripts" aria-current="page"/);
   assert.ok(script.includes(`href="${shotsUrl}" aria-current="false">分镜`));
+  f.database.prepare("INSERT INTO api_configs (name, type, base_url, api_key, model) VALUES ('分镜模型', 'llm', 'http://127.0.0.1:1/v1', 'synthetic-creation-token', 'storyboard-model')").run();
   const response = await f.get(shotsUrl);
   assert.equal(response.status, 200);
   const shots = await response.text();
-  assert.match(shots, /还没有分镜/);
-  assert.match(shots, /镜头图.*Ref2VA/);
-  assert.match(shots, /分镜与镜头图生成尚未接入/);
-  assert.doesNotMatch(shots, /id="episode-script-form"|id="generate-episode-script"|已保存剧本/);
+  assert.match(shots, /id="storyboard-form"/);
+  assert.match(shots, /id="storyboard-api"/);
+  assert.match(shots, /分镜模型 · storyboard-model/);
+  assert.match(shots, /readonly[^>]*>已保存剧本/);
+  assert.doesNotMatch(shots, /id="episode-script-form"|id="generate-episode-script"|synthetic-creation-token/);
   assert.match(shots, /href="\?view=storyboards" aria-current="page"/);
   assert.ok(shots.includes(`href="${scriptUrl}" aria-current="false">剧本`));
   assert.ok(shots.includes(`href="${shotsUrl}" aria-current="page">分镜`));

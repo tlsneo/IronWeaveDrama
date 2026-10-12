@@ -169,7 +169,7 @@ test('版本 8 升级保留完整图片、配置和归属，启用不复用 ID�
   let database;
   try {
     const f = await fixture(t, filename);
-    f.database.exec('DROP TABLE scene_images; DROP TABLE scene_references; DROP TABLE episode_occurrences; DROP TABLE episode_extractions; DROP TABLE scenes; DROP TABLE episode_scripts; ALTER TABLE character_boards DROP COLUMN reference_id; DROP TABLE character_references;');
+    f.database.exec('DROP TABLE episode_storyboards; DROP TABLE scene_images; DROP TABLE scene_references; DROP TABLE episode_occurrences; DROP TABLE episode_extractions; DROP TABLE scenes; DROP TABLE episode_scripts; ALTER TABLE character_boards DROP COLUMN reference_id; DROP TABLE character_references;');
     const original = snapshot(f.database);
     await f.close();
     // 用当前表结构重建一个真正没有 AUTOINCREMENT 的版本 8。
@@ -197,7 +197,7 @@ test('版本 8 升级保留完整图片、配置和归属，启用不复用 ID�
     assert.equal(database.prepare("SELECT name FROM sqlite_master WHERE name LIKE '%_new'").get(), undefined);
     database.close();
     database = openDatabase(filename);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 14);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 15);
     assert.equal(database.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
     original[4] = original[4].map(row => Object.assign(Object.create(null), row, { reference_id: null }));
     assert.deepEqual(snapshot(database), original);

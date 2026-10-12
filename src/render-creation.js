@@ -1,6 +1,8 @@
 import { escapeHtml, deleteButton } from './html.js';
 import { readEpisodeScript } from './episode-scripts.js';
 import { renderEpisodeResources } from './render-episode-resources.js';
+import { renderStoryboards } from './render-storyboards.js';
+import { projectStoryboardSummary, formatStoryboardDuration } from './storyboards.js';
 
 function nameButton(url, label, name = '', seasonId = '') {
   return `<button class="theme-toggle" type="button" data-name-dialog data-url="${url}" data-title="${label}" data-name="${escapeHtml(name)}" data-season-id="${seasonId}">${label}</button>`;
@@ -72,7 +74,9 @@ export function renderCreation(database, projectId, view, query) {
         ${items.length ? `<ul class="script-links">${items.map(episode => `<li><a href="${storyboardList ? `${base}?view=storyboards&episode=${episode.id}` : episodeLink(episode)}">${escapeHtml(episode.name)}<span>本集${storyboardList ? '分镜' : '剧本'} →</span></a>${deleteButton(`${base}/episodes/${episode.id}/delete`, episode.name, `确定删除“${episode.name}”？该集及其剧本、分镜将删除，无法恢复。`)}</li>`).join('')}</ul>` : `<p class="season-empty">还没有分集。<a href="${base}?view=seasons&season=${season.id}">去添加集 →</a></p>`}
       </section>`;
     }).join('');
-    return { title: storyboardList ? '分镜' : '剧本', description: storyboardList ? '按季进入各集分镜，镜头设计与剧本分开查看。' : '按季查看各集剧本入口，与分集管理使用同一份内容。', actions: '', content: content || `<section class="studio-empty"><h3>还没有季和集</h3><p><a href="${base}?view=seasons">去分季／分集管理添加 →</a></p></section>` };
+    const summary = storyboardList ? projectStoryboardSummary(database, projectId) : null;
+    const totals = summary ? `<section class="creation-panel storyboard-project-summary"><strong>全剧已确认且版本有效：${summary.plannedEpisodes} / ${summary.episodeCount} 集 · ${summary.shotCount} 镜头 · 估算 ${formatStoryboardDuration(summary.totalSeconds)}</strong><span>未规划 ${summary.unplannedEpisodes} 集 · 旧版 ${summary.staleEpisodes} 集 · 待确认 ${summary.pendingEpisodes} 集（不计入估算）</span></section>` : '';
+    return { title: storyboardList ? '分镜' : '剧本', description: storyboardList ? '按季进入各集分镜，镜头设计与剧本分开查看。' : '按季查看各集剧本入口，与分集管理使用同一份内容。', actions: '', content: totals + (content || `<section class="studio-empty"><h3>还没有季和集</h3><p><a href="${base}?view=seasons">去分季／分集管理添加 →</a></p></section>`) };
   }
 
   const raw = query.get('episode') ?? '';
@@ -88,7 +92,7 @@ export function renderCreation(database, projectId, view, query) {
   const actions = deleteButton(`${base}/episodes/${id}/delete`, episode.name, `确定删除“${episode.name}”？该集及其剧本、分镜将删除，无法恢复。`);
   if (storyboard) return {
     title: episode.name, description: `${season.name} · 本集分镜`, actions,
-    content: `${navigation}<section class="studio-empty"><h3>还没有分镜</h3><p>本集分镜将单独展示镜头设计、镜头图和 Ref2VA 视频提示词。</p><p>分镜与镜头图生成尚未接入。</p><p><a href="${episodeLink(episode)}">查看本集剧本 →</a></p></section>`,
+    content: `${navigation}${renderStoryboards(database, projectId, id)}`,
   };
   const draft = readEpisodeScript(database, id);
   const configs = database.prepare("SELECT id, name, model, base_url AS baseUrl FROM api_configs WHERE type = 'llm' ORDER BY id").all();

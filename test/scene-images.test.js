@@ -372,7 +372,7 @@ test('schema 13 升级到 14 保留原资源；迁移失败回滚，图片/参�
   let database;
   try {
     database = openDatabase(filename);
-    database.exec("DROP TABLE scene_images; DROP TABLE scene_references; PRAGMA user_version = 13; INSERT INTO projects VALUES (1, '旧项目', '水墨', '16:9'); INSERT INTO scenes (id, project_id, name, description) VALUES (1, 1, '旧场景', '旧布局'); INSERT INTO characters (id, project_id, name, age) VALUES (1, 1, '旧角色', 28);");
+    database.exec("DROP TABLE episode_storyboards; DROP TABLE scene_images; DROP TABLE scene_references; PRAGMA user_version = 13; INSERT INTO projects VALUES (1, '旧项目', '水墨', '16:9'); INSERT INTO scenes (id, project_id, name, description) VALUES (1, 1, '旧场景', '旧布局'); INSERT INTO characters (id, project_id, name, age) VALUES (1, 1, '旧角色', 28);");
     database.prepare("INSERT INTO character_boards (character_id, image, mime, width, height, valid, revision, model, prompt) VALUES (1, ?, 'image/png', 16, 9, 1, 'old-revision', 'old-model', 'old-prompt')").run(png());
     const tables = ['projects', 'scenes', 'characters', 'character_boards'];
     const original = tables.map(table => database.prepare(`SELECT * FROM ${table}`).all());
@@ -389,7 +389,7 @@ test('schema 13 升级到 14 保留原资源；迁移失败回滚，图片/参�
     assert.deepEqual(database.prepare("SELECT name FROM sqlite_master WHERE name IN ('scene_images', 'scene_references')").all(), []);
     assert.deepEqual(tables.map(table => database.prepare(`SELECT * FROM ${table}`).all()), original);
     database.close(); database = openDatabase(filename);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 14);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 15);
     assert.deepEqual(tables.map(table => database.prepare(`SELECT * FROM ${table}`).all()), original);
     assert.deepEqual(rows(database), []);
     const { referenceId } = await saveSceneReference(database, 1, 1, referenceForm());
