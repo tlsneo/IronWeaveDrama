@@ -170,6 +170,37 @@ test('逐镜字段边界、唯一原文／标题顺序、时长0.1步长、当�
   assert.equal(f.requests.length, 0);
 });
 
+test('原文必须属于所标场次，不能借后一场冒充前场覆盖或跨越场边界；失败保留旧稿及付费返回文本', async t => {
+  const f = await fixture(t); assert.equal((await f.save()).status, 200); const original = f.row();
+  const wrongScene = { ...shots[0], quote: shots[1].quote };
+  const acrossScenes = { ...shots[0], quote: script.slice(script.indexOf(shots[0].quote), script.indexOf(shots[1].quote) + shots[1].quote.length) };
+  for (const shot of [wrongScene, acrossScenes, { ...shots[0], sceneHeading: '1' }]) {
+    assert.equal((await f.save([shot])).status, 400); assert.deepEqual(f.row(), original);
+  }
+  f.result(completion({ shots: [wrongScene, shots[1]] }));
+  const response = await f.generate(); assert.equal(response.status, 502);
+  assert.deepEqual(JSON.parse((await response.json()).recoveryText), { shots: [wrongScene, shots[1]] });
+  assert.deepEqual(f.row(), original); assert.equal(f.requests.length, 1);
+  f.db.prepare('UPDATE episode_scripts SET script = ? WHERE episode_id = 1').run(script.replaceAll('\n', '\r\n'));
+  assert.equal((await f.save()).status, 200, 'CRLF source positions still accept correctly anchored shots');
+  f.result(completion({ shots })); assert.equal((await f.generate()).status, 200, 'CRLF source generation checks coverage without treating CR as part of the heading');
+  const current = f.row(), duplicateHeading = script.replace(shots[1].sceneHeading, shots[0].sceneHeading);
+  f.db.prepare('UPDATE episode_scripts SET script = ? WHERE episode_id = 1').run(duplicateHeading);
+  f.result(completion({ shots: [{ ...shots[1], sceneHeading: shots[0].sceneHeading }] }));
+  assert.equal((await f.generate()).status, 502, 'repeated identical heading lines are separate scene intervals, not proof of both scenes being covered');
+  assert.deepEqual(f.row(), current); assert.equal(f.requests.length, 3);
+});
+
+test('画面类型必须是枚举字符串，数组和其他JSON类型不保存、不改变旧分镜叙事层', async t => {
+  const f = await fixture(t); assert.equal((await f.save()).status, 200); const original = f.row();
+  for (const mode of [['memory'], ['on_screen'], [], null, false, 1, { toString: 'memory' }]) {
+    assert.equal((await f.save([{ ...shots[1], mode }])).status, 400); assert.deepEqual(f.row(), original);
+  }
+  f.result(completion({ shots: [shots[0], { ...shots[1], mode: ['memory'] }] }));
+  const response = await f.generate(); assert.equal(response.status, 502);
+  assert.ok((await response.json()).recoveryText); assert.deepEqual(f.row(), original); assert.equal(f.requests.length, 1);
+});
+
 test('计费前拒绝旧版本／脚本／资源快照、非法最大时长和模型配置；替换已有镜头须yes确认，旧计划保留', async t => {
   const f = await fixture(t); assert.equal((await f.save()).status, 200); const original = f.row();
   for (const action of ['storyboards', 'generate-storyboards']) {

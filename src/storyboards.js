@@ -56,16 +56,18 @@ function snapshots(database, projectId, episodeId, form) {
 function validateShots(value, script, resources, maxShotSeconds, required = false) {
   if (!Array.isArray(value) || value.length > 300 || (required && !value.length) || JSON.stringify(value).length > 512000) reject(400, '分镜须为完整镜头列表，最多 300 镜／512000 字符；不能以空输出代替成功。');
   const fields = { title: 120, sceneHeading: 300, quote: 1500, framing: 500, action: 1500, dialogue: 2000, sound: 1000, transition: 500, timingReason: 500 };
-  const headings = new Map();
-  for (const match of script.matchAll(/^([^\r\n]+)\r?$/gm)) if (!headings.has(match[1])) headings.set(match[1], match.index);
+  const headingNames = new Set(value.map(shot => shot?.sceneHeading));
+  // shortcut: unnumbered scenes use submitted headings; add a heading contract before checking their full coverage.
+  const headings = [...script.matchAll(/^([^\r\n]+)\r?$/gm)].filter(match => /^\d+-\d+/.test(match[1]) || headingNames.has(match[1]));
   return value.map((shot, index) => {
     try {
       if (!shot || typeof shot !== 'object' || Array.isArray(shot)) reject(400, '镜头格式无效。');
       const clean = {};
       for (const [key, max] of Object.entries(fields)) clean[key] = text(Object.hasOwn(shot, key) ? shot[key] : '', max, ['title', 'sceneHeading', 'quote', 'framing', 'action', 'timingReason'].includes(key));
       const start = script.indexOf(clean.quote);
-      if (start < 0 || script.indexOf(clean.quote, start + 1) !== -1 || !headings.has(clean.sceneHeading) || headings.get(clean.sceneHeading) > start) reject(400, '原文依据须在当前剧本中唯一存在，完整场标题须出现在该位置之前。');
-      if (!Object.hasOwn(occurrenceModes, shot.mode)) reject(400, '画面类型无效。');
+      const heading = headings.findLast(match => match.index <= start), nextHeading = headings.find(match => match.index > start);
+      if (start < 0 || script.indexOf(clean.quote, start + 1) !== -1 || heading?.[1] !== clean.sceneHeading || (nextHeading && start + clean.quote.length > nextHeading.index)) reject(400, '原文依据须在当前剧本中唯一存在，位于所标完整场标题之内，不能引用其他场或跨越场边界。');
+      if (typeof shot.mode !== 'string' || !Object.hasOwn(occurrenceModes, shot.mode)) reject(400, '画面类型无效。');
       if (typeof shot.duration !== 'number' || !Number.isFinite(shot.duration) || shot.duration <= 0 || shot.duration > maxShotSeconds || Math.abs(shot.duration * 10 - Math.round(shot.duration * 10)) > 1e-8) reject(400, `预计时长须以 0.1 秒递增，且大于 0、不超过 ${maxShotSeconds} 秒；请拆分或核对，不能强行加速。`);
       if (!Array.isArray(shot.characterIds) || shot.characterIds.length > 50 || new Set(shot.characterIds).size !== shot.characterIds.length || shot.characterIds.some(id => !Number.isSafeInteger(id) || !resources.characters.some(item => item.id === id))) reject(400, '人物关联须来自本集已确认的当前画面资源，不得重复或猜编号。');
       if (shot.sceneId !== null && (!Number.isSafeInteger(shot.sceneId) || !resources.scenes.some(item => item.id === shot.sceneId))) reject(400, '场景关联须来自本集已确认的当前画面资源；未关联时使用空值。');
@@ -111,8 +113,9 @@ export async function generateEpisodeStoryboards(database, projectId, episodeId,
       const result = JSON.parse(raw.trim().replace(/^```(?:json)?\s*\n([\s\S]*?)\n```$/i, '$1'));
       if (!result || Object.keys(result).length !== 1 || !Object.hasOwn(result, 'shots')) throw new Error('输出字段不符');
       shots = validateShots(result.shots, before.script.script, before.resources, before.maxShotSeconds, true);
-      const headings = [...before.script.script.matchAll(/^\d+-\d+[^\r\n]*$/gm)].map(match => match[0].replace(/\r$/, ''));
-      if (headings.some(heading => !shots.some(shot => shot.sceneHeading === heading))) throw new Error('未覆盖全部已编号剧本场');
+      const headings = [...before.script.script.matchAll(/^(\d+-\d+[^\r\n]*)\r?$/gm)];
+      const anchors = shots.map(shot => ({ heading: shot.sceneHeading, start: before.script.script.indexOf(shot.quote) }));
+      if (headings.some((heading, index) => !anchors.some(anchor => anchor.heading === heading[1] && anchor.start >= heading.index && anchor.start < (headings[index + 1]?.index ?? before.script.script.length)))) throw new Error('未覆盖全部已编号剧本场');
       // 先验证原文定位再脱敏；脱敏若改变依据，也不能伪称它仍来自剧本。
       shots = shots.map(shot => Object.fromEntries(Object.entries(shot).map(([key, value]) => [key, typeof value === 'string' ? safeModelText(config, value) : value])));
       shots = validateShots(shots, before.script.script, before.resources, before.maxShotSeconds, true);

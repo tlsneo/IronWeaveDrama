@@ -105,6 +105,7 @@
       if (shots.length > 300 || json.length > 512000) { error.textContent = '最多 300 镜头，镜头 JSON 不得超过 512000 字符。'; return; }
       body.set('shots', json);
     }
+    if (!recovery.hidden && recoveryText.value && !window.confirm('本页还有未保存的模型返回文本。继续操作可能替换或清除它；请先复制保留，确认放弃后再继续。是否继续？')) return;
     const label = active.textContent;
     busy = true; main.inert = true; active.disabled = true;
     active.textContent = generating ? '生成中…' : '保存中…';

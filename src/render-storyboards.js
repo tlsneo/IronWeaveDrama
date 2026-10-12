@@ -34,6 +34,7 @@ export function renderStoryboards(db, projectId, episodeId) {
     const characters = shot.characterIds ?? [];
     const missingCharacters = characters.filter(id => !resources.characters.some(resource => resource.id === id));
     const missingScene = shot.sceneId != null && !resources.scenes.some(resource => resource.id === shot.sceneId);
+    const invalidMode = shot.mode !== undefined && (typeof shot.mode !== 'string' || !Object.hasOwn(modes, shot.mode));
     return `<article class="storyboard-shot" data-storyboard-shot ${template ? '' : `id="storyboard-shot-${index + 1}"`}>
       <h4 class="storyboard-scene" data-storyboard-scene ${index && plan.shots[index - 1]?.sceneHeading === shot.sceneHeading ? 'hidden' : ''}>${html(shot.sceneHeading || '尚未填写场标题')}</h4>
       <details ${index === 0 ? 'open' : ''}>
@@ -41,7 +42,7 @@ export function renderStoryboards(db, projectId, episodeId) {
         <div class="storyboard-shot-body">
           <div class="storyboard-shot-actions"><button type="button" class="order-button" data-storyboard-action="up" aria-label="上移镜头">↑</button><button type="button" class="order-button" data-storyboard-action="down" aria-label="下移镜头">↓</button><button type="button" class="theme-toggle delete-button" data-storyboard-action="delete">删除镜头</button></div>
           <div class="storyboard-fields">${textFields.slice(0, 3).map(field => textControl(field, shot)).join('')}
-            <div class="form-field"><label>画面类型<select data-storyboard-field="mode">${Object.entries(modes).map(([value, label]) => `<option value="${value}" ${shot.mode === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label></div>
+            <div class="form-field"><label>画面类型<select data-storyboard-field="mode" required>${invalidMode ? '<option value="" selected>画面类型无效，请重新选择</option>' : ''}${Object.entries(modes).map(([value, label]) => `<option value="${value}" ${shot.mode === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label></div>
             <div class="form-field"><label>计划时长（秒，0.1 秒步进）<input type="number" data-storyboard-field="duration" min="0.1" max="${plan.maxShotSeconds}" step="0.1" required value="${html(shot.duration)}" aria-describedby="storyboard-duration-error"></label></div>
             <fieldset class="storyboard-character-choices"><legend>出镜角色（本集已确认资源，可多选）</legend>${resources.characters.map(resource => `<label><input type="checkbox" data-storyboard-character value="${resource.id}" ${characters.includes(resource.id) ? 'checked' : ''}>${html(resource.name)}</label>`).join('') || '<p class="field-help">还没有已确认角色；可继续设计文字分镜。</p>'}${missingCharacters.map(id => `<label class="form-error"><input type="checkbox" data-storyboard-character value="${html(id)}" checked>已失效角色 #${html(id)}，请取消并重新选择</label>`).join('')}</fieldset>
             <div class="form-field"><label>关联场景<select data-storyboard-field="sceneId"><option value="">不关联场景</option>${resources.scenes.map(resource => `<option value="${resource.id}" ${shot.sceneId === resource.id ? 'selected' : ''}>${html(resource.name)}</option>`).join('')}${missingScene ? `<option value="${html(shot.sceneId)}" selected>已失效场景 #${html(shot.sceneId)}，请重新选择</option>` : ''}</select></label></div>

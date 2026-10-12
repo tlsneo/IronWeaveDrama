@@ -143,9 +143,35 @@ test('network or malformed response warns about possible billing and never retri
   let calls = 0;
   const p = page(async () => ++calls === 1 ? failed({ error: '返回格式无效', recoveryText: '付费内容' }) : ok({ revision: 2, redirect: '/projects/1?view=storyboards&episode=2' }), { shots: [goodShot()] });
   p.input(p.list.items[0].fields.title, '编辑稿'); await p.generate(); assert.equal(p.beforeUnload(), true);
-  await p.generate(); assert.equal(calls, 2); assert.equal(p.confirmations.length, 2);
+  await p.generate(); assert.equal(calls, 2); assert.equal(p.confirmations.length, 3);
+  assert.match(p.confirmations[2], /模型返回文本.*复制.*放弃/);
   assert.equal(p.nodes.recovery.hidden, true); assert.equal(p.nodes['recovery-text'].value, '');
   assert.equal(p.form.dataset.dirty, ''); assert.equal(p.reloads[0].guarded, false);
+});
+
+test('uncopied paid recovery requires explicit discard consent before saving or a fresh generation; cancel preserves all input and recovery', async () => {
+  for (const action of ['save', 'generate']) {
+    const p = page(() => assert.fail('Declining to discard recovery must not submit'), { shots: action === 'save' ? [goodShot()] : [], confirmed: false, revision: '7' });
+    p.nodes.recovery.hidden = false; p.nodes['recovery-text'].value = '未复制的付费文本';
+    if (action === 'save') p.input(p.list.items[0].fields.title, '人工改稿');
+    await p[action]();
+    assert.equal(p.confirmations.length, 1); assert.match(p.confirmations[0], /模型返回文本.*复制.*放弃/);
+    assert.equal(p.nodes['recovery-text'].value, '未复制的付费文本'); assert.equal(p.nodes.recovery.hidden, false);
+    assert.equal(p.form.dataset.revision, '7'); assert.equal(p.reloads.length, 0); assert.equal(p.main.inert, false); assert.equal(p.beforeUnload(), true);
+    if (action === 'save') { assert.equal(p.list.items[0].fields.title.value, '人工改稿'); assert.equal(p.form.dataset.dirty, 'true'); }
+  }
+});
+
+test('manual save may clear recovery only after discard consent; failed save retains paid recovery and edits despite consent', async () => {
+  for (const success of [false, true]) {
+    let calls = 0;
+    const p = page(async () => { calls++; return success ? ok({ revision: 8 }) : failed({ error: '保存失败' }); }, { shots: [goodShot()], revision: '7' });
+    p.nodes.recovery.hidden = false; p.nodes['recovery-text'].value = '付费返回原文'; p.input(p.list.items[0].fields.title, '编辑稿');
+    await p.save(); assert.equal(calls, 1); assert.equal(p.confirmations.length, 1); assert.match(p.confirmations[0], /复制.*放弃/);
+    assert.equal(p.reloads.length, Number(success)); assert.equal(p.nodes.recovery.hidden, success);
+    assert.equal(p.nodes['recovery-text'].value, success ? '' : '付费返回原文'); assert.equal(p.beforeUnload(), !success);
+    assert.equal(p.form.dataset.revision, success ? '8' : '7');
+  }
 });
 
 test('save errors preserve edits and snapshots; conflict is not fake success; saving has duplicate lock and no retry', async () => {
@@ -293,6 +319,16 @@ test('saved shots render all fields, exact scene headings, first expanded previe
   assert.match(html, /id="storyboard-stale"/); assert.match(html, /data-stale="true"/);
   assert.match(html, /已失效场景 #20/); assert.match(html, /&lt;危险标题&gt;/);
   assert.match(html, /id="storyboard-save"[^>]*disabled/); assert.match(html, /旧版 1 集/);
+});
+
+test('legacy malformed mode is shown as invalid rather than silently selecting reality; viewing never rewrites it', t => {
+  const { db, save } = rendererFixture(t);
+  const shot = { ...goodShot(), characterIds: [], sceneId: null }; save([shot]);
+  db.prepare('UPDATE episode_storyboards SET shots = ? WHERE episode_id = 1').run(JSON.stringify([{ ...shot, mode: ['memory'] }]));
+  const html = renderStoryboards(db, 1, 1);
+  assert.match(html, /data-storyboard-field="mode" required><option value="" selected>画面类型无效，请重新选择/);
+  assert.doesNotMatch(html, /value="(?:on_screen|memory|imagination)" selected/);
+  assert.deepEqual(JSON.parse(db.prepare('SELECT shots FROM episode_storyboards WHERE episode_id = 1').get().shots)[0].mode, ['memory']);
 });
 
 test('unreviewed drafts and absent script/config/resources have explicit status, disable paid generation but not manual editing', t => {
