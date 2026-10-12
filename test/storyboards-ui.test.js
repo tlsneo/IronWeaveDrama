@@ -293,15 +293,18 @@ function rendererFixture(t) {
   return { db, save };
 }
 
-test('renderer returns escaped HTML with current snapshots, read-only saved script/resources, no shared script editor or secrets', t => {
-  const { db } = rendererFixture(t), html = renderStoryboards(db, 1, 1);
+test('renderer opens directly into planning with current snapshots and escaped resource choices, without duplicate script/resource previews or secrets', t => {
+  const { db } = rendererFixture(t);
+  db.exec("UPDATE scenes SET name = '<客厅>' WHERE id = 20");
+  const html = renderStoryboards(db, 1, 1);
   assert.equal(typeof html, 'string');
   for (const id of ['storyboard-form', 'storyboard-recovery', 'storyboard-recovery-text', 'storyboard-shot-template']) assert.ok(html.includes(`id="${id}"`));
-  assert.match(html, /data-revision="0" data-script-revision="4"/); assert.match(html, /id="storyboard-script-text"[^>]*readonly/);
-  assert.match(html, /id="storyboard-recovery-text"[^>]*readonly/); assert.match(html, /&lt;\/textarea&gt;&lt;script&gt;alert\(1\)&lt;\/script&gt;/);
+  assert.match(html, /data-revision="0" data-script-revision="4"/);
+  assert.match(html, /id="storyboard-recovery-text"[^>]*readonly/);
+  assert.doesNotMatch(html, /storyboard-script-text|storyboard-resources|storyboard-reference|查看已保存剧本|查看本集已确认资源|林秋推门。|<img/);
   assert.doesNotMatch(html, /<script>alert|episode-script-form|never-render-secret|image-secret|image-model/);
-  assert.match(html, /&lt;编剧&gt; · shot-model/); assert.match(html, /不表示模型看过图片像素/);
-  assert.match(html, /\/projects\/1\/scenes\/20\/references\/1/); assert.match(html, /loading="lazy" alt="客厅参考图"/);
+  assert.match(html, /&lt;编剧&gt; · shot-model/); assert.match(html, /data-storyboard-field="sceneId"[\s\S]*?<option value="20"[^>]*>&lt;客厅&gt;<\/option>/);
+  assert.match(html, /data-storyboard-field="quote"/); assert.match(html, /根据本集已保存剧本和已确认资源生成分镜/);
   assert.match(html, /未规划 2 集 · 旧版 0 集 · 待确认 0 集/);
   assert.throws(() => renderStoryboards(db, 2, 1), /集不存在/);
 });
@@ -338,6 +341,6 @@ test('unreviewed drafts and absent script/config/resources have explicit status,
   db.exec('DELETE FROM api_configs');
   const html = renderStoryboards(db, 1, 2);
   assert.match(html, /id="storyboard-generate"[^>]*disabled/); assert.match(html, /尚无大语言模型配置/);
-  assert.match(html, /还没有已保存的剧本/); assert.match(html, /尚无本集已确认资源/);
+  assert.match(html, /还没有已保存的剧本/); assert.match(html, /还没有已确认角色/);
   assert.doesNotMatch(html, /id="storyboard-add"[^>]*disabled/);
 });

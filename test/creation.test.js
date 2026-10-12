@@ -116,7 +116,8 @@ test('剧本与分镜使用独立页面和本集导航，旧剧本地址仍有�
   assert.match(shots, /id="storyboard-form"/);
   assert.match(shots, /id="storyboard-api"/);
   assert.match(shots, /分镜模型 · storyboard-model/);
-  assert.match(shots, /readonly[^>]*>已保存剧本/);
+  assert.doesNotMatch(shots, /storyboard-script-text|storyboard-resources|查看已保存剧本|查看本集已确认资源/);
+  assert.match(shots, /data-script-revision="1"/);
   assert.doesNotMatch(shots, /id="episode-script-form"|id="generate-episode-script"|synthetic-creation-token/);
   assert.match(shots, /href="\?view=storyboards" aria-current="page"/);
   assert.ok(shots.includes(`href="${scriptUrl}" aria-current="false">剧本`));
