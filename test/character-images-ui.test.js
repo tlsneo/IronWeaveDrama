@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 
 const script = await readFile(new URL('../public/character-images.js', import.meta.url), 'utf8');
-function page(fetch) {
+function page(fetch, kind = 'character') {
   const events = {};
   let reloads = 0;
   const nodes = {
@@ -19,9 +19,38 @@ function page(fetch) {
     'character-board-image': { src: '/old-image' },
     'character-board-empty': { hidden: true }, 'character-board-note': { textContent: '' },
   };
-  runInNewContext(script, { document: { getElementById: id => nodes[id] }, window: { confirm: () => { throw new Error('角色生成不应弹出确认窗口'); }, location: { reload() { reloads++; } }, addEventListener(event, handler) { events[event] = handler; } }, fetch, URLSearchParams, TypeError, Error });
+  if (kind === 'scene') { nodes['character-generation-form'].dataset.kind = 'scene'; nodes['character-generation-form'].dataset.url = '/projects/1/scenes/2/generate'; }
+  runInNewContext(script, { document: { getElementById: id => kind === 'scene' ? id.includes('character') ? undefined : nodes[id.replace('scene', 'character')] : nodes[id] }, window: { confirm: () => { throw new Error('角色生成不应弹出确认窗口'); }, location: { reload() { reloads++; } }, addEventListener(event, handler) { events[event] = handler; } }, fetch, URLSearchParams, TypeError, Error });
   return { nodes, click: () => events.click(), clear: () => events.clear(), beforeUnload: event => events.beforeunload(event), reloads: () => reloads };
 }
+
+test('场景使用同一生成交互，正确提交场景路径与配置／参考图快照，未保存或正在请求时不重复生图', async () => {
+  let calls = 0, finish;
+  const p = page((url, options) => {
+    calls++; assert.equal(url, '/projects/1/scenes/2/generate'); assert.equal(options.body.get('referenceId'), '10');
+    assert.equal(options.body.get('revision'), 'revision'); assert.equal(options.body.get('apiConfigId'), '3');
+    assert.equal(options.body.has('prompt'), false);
+    return new Promise(resolve => { finish = resolve; });
+  }, 'scene');
+  p.nodes['character-generation-form'].dataset.referenceId = '10';
+  p.nodes['character-form'].dataset.dirty = 'true'; await p.click(); assert.equal(calls, 0);
+  assert.match(p.nodes['character-generation-error'].textContent, /场景资料/);
+  p.nodes['character-form'].dataset.dirty = ''; const pending = p.click(); await p.click(); assert.equal(calls, 1);
+  finish({ ok: true, json: async () => ({ valid: false, imageUrl: '/projects/1/scenes/2/images/8', message: '未替换原场景参考图' }) }); await pending;
+  assert.equal(p.nodes['character-board-image'].src, '/projects/1/scenes/2/images/8'); assert.equal(p.reloads(), 0);
+  assert.equal(p.nodes['character-generation-form'].dataset.boardId, '8');
+});
+
+test('场景清空与失败恢复复用同一交互，不调用角色路径，付费失败不自动重试', async () => {
+  let calls = 0; const p = page(async (url, options) => {
+    calls++; assert.equal(url, '/projects/1/scenes/2/clear-image'); assert.equal(options.body.get('boardId'), '7'); return { ok: true, json: async () => ({ cleared: true }) };
+  }, 'scene');
+  await p.clear(); assert.equal(calls, 1); assert.equal(p.reloads(), 1);
+  const failed = page(async () => { throw new TypeError('network'); }, 'scene'); await failed.click();
+  assert.match(failed.nodes['character-generation-error'].textContent, /刷新场景页.*可能已计费/); assert.equal(failed.reloads(), 0);
+  const recovery = page(async () => ({ ok: false, json: async () => ({ recoveryImage: 'data:image/png;base64,eA==', error: '保存失败' }) }), 'scene');
+  await recovery.click(); assert.match(recovery.nodes['character-board-note'].textContent, /原场景参考图不变/); assert.equal(recovery.nodes['clear-character-image'].disabled, true);
+});
 
 test('资料已保存时点击直接生图，不弹确认窗；按钮变为生成中并防重复请求，成功刷新预览', async () => {
   let calls = 0, finish;

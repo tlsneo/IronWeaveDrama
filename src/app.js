@@ -12,7 +12,8 @@ import { generateCharacterBoard, clearCharacterBoard, saveCharacterReference, cl
 import { deleteItem } from './deletion.js';
 import { saveEpisodeScript, generateEpisodeScript } from './episode-scripts.js';
 import { extractEpisodeResources, confirmEpisodeResources, updateEpisodeOccurrence, removeEpisodeResources } from './episode-resources.js';
-import { saveScene, renderScenes } from './scenes.js';
+import { saveScene, findScene, renderScenes } from './scenes.js';
+import { generateSceneImage, clearSceneImage, saveSceneReference, clearSceneReference } from './scene-images.js';
 
 const resourceTypes = new Map([
   ['characters', { name: '角色', description: '管理这部短剧的基础角色与参考图' }],
@@ -102,9 +103,9 @@ export function createApp(database) {
     const extractionRoute = path.match(/^\/projects\/([1-9]\d*)\/episodes\/([1-9]\d*)\/(extract-resources|confirm-resources|remove-resources|resource-occurrences\/([1-9]\d*))$/);
     const sceneRoute = path.match(/^\/projects\/([1-9]\d*)\/scenes(?:\/([1-9]\d*))?$/);
     const characterRoute = path.match(/^\/projects\/([1-9]\d*)\/characters(?:\/([1-9]\d*))?$/);
-    const generationRoute = path.match(/^\/projects\/([1-9]\d*)\/characters\/([1-9]\d*)\/(generate|edit-image|clear-image)$/);
-    const referenceRoute = path.match(/^\/projects\/([1-9]\d*)\/characters\/([1-9]\d*)\/(reference-image|clear-reference)$/);
-    const boardRoute = path.match(/^\/projects\/([1-9]\d*)\/characters\/([1-9]\d*)\/(boards|references)\/([1-9]\d*)$/);
+    const generationRoute = path.match(/^\/projects\/([1-9]\d*)\/(characters|scenes)\/([1-9]\d*)\/(generate|edit-image|clear-image)$/);
+    const referenceRoute = path.match(/^\/projects\/([1-9]\d*)\/(characters|scenes)\/([1-9]\d*)\/(reference-image|clear-reference)$/);
+    const boardRoute = path.match(/^\/projects\/([1-9]\d*)\/(characters|scenes)\/([1-9]\d*)\/(boards|images|references)\/([1-9]\d*)$/);
     const settingsRoute = path.match(/^\/settings\/api(?:\/([1-9]\d*)(\/check)?)?$/);
 
     try {
@@ -141,27 +142,27 @@ export function createApp(database) {
         return;
       }
       if (referenceRoute && request.method === 'POST') {
-        const [projectId, id] = referenceRoute.slice(1).map(Number);
-        const form = await readForm(request, 8192, referenceRoute[3] === 'reference-image');
-        if (![projectId, id].every(Number.isSafeInteger)) { json(404, { error: '角色不存在' }); return; }
-        json(referenceRoute[3] === 'reference-image' ? 201 : 200, referenceRoute[3] === 'reference-image'
-          ? await saveCharacterReference(database, projectId, id, form) : clearCharacterReference(database, projectId, id, form));
+        const [projectId, id] = [referenceRoute[1], referenceRoute[3]].map(Number);
+        const scene = referenceRoute[2] === 'scenes'; const uploading = referenceRoute[4] === 'reference-image';
+        const form = await readForm(request, 8192, uploading);
+        if (![projectId, id].every(Number.isSafeInteger)) { json(404, { error: '资源不存在' }); return; }
+        json(uploading ? 201 : 200, uploading
+          ? await (scene ? saveSceneReference : saveCharacterReference)(database, projectId, id, form)
+          : (scene ? clearSceneReference : clearCharacterReference)(database, projectId, id, form));
         return;
       }
       if (generationRoute && request.method === 'POST') {
-        const [projectId, id] = generationRoute.slice(1).map(Number);
+        const [projectId, id] = [generationRoute[1], generationRoute[3]].map(Number);
+        const scene = generationRoute[2] === 'scenes';
         const form = await readForm(request, 32768);
-        if (![projectId, id].every(Number.isSafeInteger)) {
-          json(404, { error: '角色不存在' });
-          return;
-        }
-        if (generationRoute[3] === 'edit-image') {
-          findCharacter(database, projectId, id);
+        if (![projectId, id].every(Number.isSafeInteger)) { json(404, { error: '资源不存在' }); return; }
+        if (generationRoute[4] === 'edit-image') {
+          (scene ? findScene : findCharacter)(database, projectId, id);
           json(503, { error: '遮罩修图接口尚未接入，不会调用模型或回退为整图编辑。' });
           return;
         }
-        json(200, generationRoute[3] === 'clear-image' ? clearCharacterBoard(database, projectId, id, form)
-          : await generateCharacterBoard(database, projectId, id, form));
+        json(200, generationRoute[4] === 'clear-image' ? (scene ? clearSceneImage : clearCharacterBoard)(database, projectId, id, form)
+          : await (scene ? generateSceneImage : generateCharacterBoard)(database, projectId, id, form));
         return;
       }
       if (settingsRoute && request.method === 'POST') {
@@ -232,14 +233,12 @@ export function createApp(database) {
         return;
       }
       if (boardRoute) {
-        const [projectId, id, boardId] = [boardRoute[1], boardRoute[2], boardRoute[4]].map(Number);
-        const table = boardRoute[3] === 'boards' ? 'character_boards' : 'character_references';
-        if (![projectId, id, boardId].every(Number.isSafeInteger)) {
-          send(404, 'text/plain', '角色板不存在');
-          return;
-        }
-        findCharacter(database, projectId, id);
-        const board = database.prepare(`SELECT image, mime FROM ${table} WHERE id = ? AND character_id = ?`).get(boardId, id);
+        const [projectId, id, boardId] = [boardRoute[1], boardRoute[3], boardRoute[5]].map(Number);
+        const scene = boardRoute[2] === 'scenes';
+        if (![projectId, id, boardId].every(Number.isSafeInteger) || (scene ? boardRoute[4] === 'boards' : boardRoute[4] === 'images')) { send(404, 'text/plain', '图片不存在'); return; }
+        const table = boardRoute[4] === 'references' ? scene ? 'scene_references' : 'character_references' : scene ? 'scene_images' : 'character_boards';
+        (scene ? findScene : findCharacter)(database, projectId, id);
+        const board = database.prepare(`SELECT image, mime FROM ${table} WHERE id = ? AND ${scene ? 'scene_id' : 'character_id'} = ?`).get(boardId, id);
         if (!board) { send(404, 'text/plain', '角色板不存在'); return; }
         send(200, board.mime, board.image, { 'Content-Length': board.image.length });
         return;

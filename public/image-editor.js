@@ -1,9 +1,10 @@
 import { imagePoint, paintSegment, replayMask, maskPixels } from './image-mask.js';
 
-const dialog = document.getElementById('character-image-edit-dialog');
+const dialog = document.getElementById('character-image-edit-dialog') ?? document.getElementById('scene-image-edit-dialog');
 if (dialog) {
-  const button = document.getElementById('edit-character-image');
-  const source = document.getElementById('character-board-image');
+  const kind = dialog.dataset?.kind ?? 'character';
+  const button = document.getElementById(`edit-${kind}-image`);
+  const source = document.getElementById(`${kind}-board-image`);
   const stage = document.getElementById('image-edit-stage');
   const image = document.getElementById('image-edit-source');
   const overlay = document.getElementById('image-edit-overlay');
@@ -16,7 +17,7 @@ if (dialog) {
   const errorElement = document.getElementById('image-edit-error');
   const status = document.getElementById('image-edit-selection');
   const zoomValue = document.getElementById('image-edit-zoom-value');
-  const prompt = document.getElementById('character-edit-instruction');
+  const prompt = document.getElementById(`${kind}-edit-instruction`);
   const cursorElement = document.getElementById('image-edit-cursor');
   let cursor = { x: 0, y: 0 };
   const tools = [...dialog.querySelectorAll('[data-mask-tool]')];
@@ -86,7 +87,7 @@ if (dialog) {
   }
 
   button.addEventListener('click', () => {
-    if (button.disabled || document.getElementById('character-form').inert || !source.getAttribute('src')) return;
+    if (button.disabled || document.getElementById(`${kind}-form`).inert || !source.getAttribute('src')) return;
     errorElement.textContent = '';
     if (!dialog.open) dialog.showModal();
     if (sourceUrl === source.src && ready) { updateView(); return; }

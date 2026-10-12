@@ -1,5 +1,6 @@
 import { inTransaction } from './database.js';
 import { assertCharacterImagesIdle } from './character-images.js';
+import { assertSceneImagesIdle } from './scene-images.js';
 import { assertEpisodeScriptsIdle } from './episode-scripts.js';
 
 function reject(status, message) { throw Object.assign(new Error(message), { status }); }
@@ -25,6 +26,8 @@ export function deleteItem(database, kind, id, projectId, form) {
     if (!item) reject(404, '待删除的内容不存在，可能已经删除。');
     if (item.name !== form.get('name')) reject(409, '内容名称已变化，请刷新页面后重新确认删除。');
     if (kind === 'characters') assertCharacterImagesIdle(database, [id]);
+    if (kind === 'scenes') assertSceneImagesIdle(database, [id]);
+    if (kind === 'projects') assertSceneImagesIdle(database, database.prepare('SELECT id FROM scenes WHERE project_id = ?').all(id).map(scene => scene.id));
     if (kind === 'projects') assertCharacterImagesIdle(database, database.prepare('SELECT id FROM characters WHERE project_id = ?').all(id).map(character => character.id));
     if (kind === 'episodes') assertEpisodeScriptsIdle(database, [id]);
     if (kind === 'seasons') assertEpisodeScriptsIdle(database, database.prepare('SELECT id FROM episodes WHERE season_id = ?').all(id).map(episode => episode.id));

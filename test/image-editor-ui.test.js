@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm';
 import { imagePoint, paintSegment, replayMask, maskPixels } from '../public/image-mask.js';
 
 const script = (await readFile(new URL('../public/image-editor.js', import.meta.url), 'utf8')).replace(/^import .*;\n/, '');
-function page() {
+function page(kind = 'character') {
   const nodes = {}, downloads = [];
   function node() {
     const events = {};
@@ -26,11 +26,12 @@ function page() {
   nodes['character-board-image'].src = '/boards/1';
   Object.assign(nodes['image-edit-source'], { naturalWidth: 8, naturalHeight: 4 });
   nodes['image-edit-brush'].value = '100';
+  if (kind === 'scene') nodes['character-image-edit-dialog'].dataset.kind = 'scene';
   runInNewContext(script, {
     imagePoint, paintSegment, replayMask, maskPixels, Uint8Array,
     ImageData: class { constructor(data) { this.data = data; } },
     document: {
-      getElementById: id => nodes[id],
+      getElementById: id => kind === 'scene' ? id.includes('character') ? undefined : nodes[id.replace('scene', 'character')] : nodes[id],
       createElement(tag) {
         if (tag === 'a') return { click() { downloads.push(this); } };
         const canvas = node(); canvas.toBlob = callback => { downloads.push(canvas); callback({}); }; return canvas;
@@ -46,6 +47,14 @@ function page() {
   };
   return { nodes, tools, downloads, stroke, open: () => nodes['edit-character-image'].click(), load: () => nodes['image-edit-source'].fire('load') };
 }
+
+test('场景图复用离线遮罩编辑器，正确打开场景原图并可绘制／撤销／导出，不发起网络调用', async () => {
+  const p = page('scene'); await p.open(); await p.load(); await p.stroke();
+  assert.equal(p.nodes['character-image-edit-dialog'].open, true); assert.equal(p.nodes['image-edit-export'].disabled, false);
+  await p.nodes['image-edit-export'].click(); assert.equal(p.downloads[0].width, 8);
+  await p.nodes['image-edit-undo'].click(); assert.equal(p.nodes['image-edit-export'].disabled, true);
+  assert.equal(p.nodes['character-board-image'].src, '/boards/1');
+});
 
 test('离线编辑器打开原图，独立绘制遮罩、撤销/重做、擦除、清空与下载；不改原图、不调用模型', async () => {
   const p = page(), n = p.nodes;

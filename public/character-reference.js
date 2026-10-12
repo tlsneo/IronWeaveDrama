@@ -1,17 +1,18 @@
 (() => {
-  const form = document.getElementById('character-generation-form');
+  const form = document.getElementById('character-generation-form') ?? document.getElementById('scene-generation-form');
   if (!form) return;
-  const characterForm = document.getElementById('character-form');
-  const upload = document.getElementById('upload-character-reference');
-  const clear = document.getElementById('clear-character-reference');
-  const input = document.getElementById('character-reference-file');
-  const errorElement = document.getElementById('character-generation-error');
+  const kind = form.dataset.kind ?? 'character'; const label = kind === 'scene' ? '场景' : '角色';
+  const characterForm = document.getElementById(`${kind}-form`);
+  const upload = document.getElementById(`upload-${kind}-reference`);
+  const clear = document.getElementById(`clear-${kind}-reference`);
+  const input = document.getElementById(`${kind}-reference-file`);
+  const errorElement = document.getElementById(`${kind}-generation-error`);
   let busy = false;
 
   function canChange() {
     if (busy || form.inert || characterForm.inert) return false;
     errorElement.textContent = '';
-    if (characterForm.dataset.dirty) { errorElement.textContent = '角色资料有未保存的修改，请先保存资料。'; return false; }
+    if (characterForm.dataset.dirty) { errorElement.textContent = `${label}资料有未保存的修改，请先保存资料。`; return false; }
     return true;
   }
   async function change(removing) {

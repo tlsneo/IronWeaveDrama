@@ -1,17 +1,19 @@
 (() => {
-  const form = document.getElementById('character-generation-form');
+  const form = document.getElementById('character-generation-form') ?? document.getElementById('scene-generation-form');
   if (!form) return;
-  const characterForm = document.getElementById('character-form');
-  const button = document.getElementById('generate-character-image');
-  const editButton = document.getElementById('edit-character-image');
-  const clearButton = document.getElementById('clear-character-image');
-  const api = document.getElementById('character-image-api');
-  const errorElement = document.getElementById('character-generation-error');
-  const statusElement = document.getElementById('character-generation-status');
-  const boardLink = document.getElementById('character-board-link');
-  const boardImage = document.getElementById('character-board-image');
-  const boardEmpty = document.getElementById('character-board-empty');
-  const boardNote = document.getElementById('character-board-note');
+  const kind = form.dataset.kind ?? 'character'; const resourceLabel = kind === 'scene' ? '场景' : '角色';
+  const imageLabel = kind === 'scene' ? '场景参考图' : '角色板';
+  const characterForm = document.getElementById(`${kind}-form`);
+  const button = document.getElementById(`generate-${kind}-image`);
+  const editButton = document.getElementById(`edit-${kind}-image`);
+  const clearButton = document.getElementById(`clear-${kind}-image`);
+  const api = document.getElementById(`${kind}-image-api`);
+  const errorElement = document.getElementById(`${kind}-generation-error`);
+  const statusElement = document.getElementById(`${kind}-generation-status`);
+  const boardLink = document.getElementById(`${kind}-board-link`);
+  const boardImage = document.getElementById(`${kind}-board-image`);
+  const boardEmpty = document.getElementById(`${kind}-board-empty`);
+  const boardNote = document.getElementById(`${kind}-board-note`);
   let busy = false;
 
   function showImage(source, note) {
@@ -26,7 +28,7 @@
   async function run(action, activeButton, label) {
     if (busy || activeButton.disabled || characterForm.inert) return;
     errorElement.textContent = '';
-    if (characterForm.dataset.dirty) { errorElement.textContent = '角色资料有未保存的修改，请先保存资料。'; return; }
+    if (characterForm.dataset.dirty) { errorElement.textContent = `${resourceLabel}资料有未保存的修改，请先保存资料。`; return; }
     const body = new URLSearchParams({ boardId: form.dataset.boardId ?? '' });
     if (action !== 'clear-image') {
       body.set('referenceId', form.dataset.referenceId ?? '');
@@ -49,7 +51,7 @@
       const result = await response.json();
       if (!response.ok) {
         if (result.recoveryImage) {
-          showImage(result.recoveryImage, '图片已生成但未能保存。请点击上方图片打开并另存，原角色板不变。');
+          showImage(result.recoveryImage, `图片已生成但未能保存。请点击上方图片打开并另存，原${imageLabel}不变。`);
           form.dataset.boardId = '';
           editButton.disabled = true;
           clearButton.disabled = true;
@@ -68,7 +70,7 @@
       }
     } catch (error) {
       errorElement.textContent = error instanceof TypeError
-        ? action === 'clear-image' ? '清空结果未确认，请刷新查看。' : '未收到图片结果，请先刷新角色页或查看服务商记录。请求可能已计费，不要直接重复提交。'
+        ? action === 'clear-image' ? '清空结果未确认，请刷新查看。' : `未收到图片结果，请先刷新${resourceLabel}页或查看服务商记录。请求可能已计费，不要直接重复提交。`
         : error.message;
       statusElement.textContent = '';
     } finally {

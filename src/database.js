@@ -237,6 +237,38 @@ export function openDatabase(filename) {
         PRAGMA user_version = 13;
       `);
     }
+    if (database.prepare('PRAGMA user_version').get().user_version < 14) {
+      database.exec(`
+        CREATE TABLE scene_references (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          scene_id INTEGER NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+          image BLOB NOT NULL,
+          mime TEXT NOT NULL,
+          width INTEGER NOT NULL,
+          height INTEGER NOT NULL,
+          cleared INTEGER NOT NULL DEFAULT 0 CHECK (cleared IN (0, 1)),
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX scene_references_current ON scene_references (scene_id, cleared, id);
+        CREATE TABLE scene_images (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          scene_id INTEGER NOT NULL REFERENCES scenes(id) ON DELETE CASCADE,
+          image BLOB NOT NULL,
+          mime TEXT NOT NULL,
+          width INTEGER NOT NULL,
+          height INTEGER NOT NULL,
+          valid INTEGER NOT NULL CHECK (valid IN (0, 1)),
+          revision TEXT NOT NULL,
+          model TEXT NOT NULL,
+          prompt TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+          cleared INTEGER NOT NULL DEFAULT 0 CHECK (cleared IN (0, 1)),
+          reference_id INTEGER REFERENCES scene_references(id) ON DELETE SET NULL
+        );
+        CREATE INDEX scene_images_current ON scene_images (scene_id, valid, cleared, id);
+        PRAGMA user_version = 14;
+      `);
+    }
     if (database.prepare('PRAGMA foreign_key_check').all().length) throw new Error('数据库关系检查失败，升级已回滚。');
     database.exec('COMMIT');
     database.exec('PRAGMA foreign_keys = ON');

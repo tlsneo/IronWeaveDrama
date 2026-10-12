@@ -4,7 +4,7 @@ import { test } from 'node:test';
 import { runInNewContext } from 'node:vm';
 
 const script = await readFile(new URL('../public/character-reference.js', import.meta.url), 'utf8');
-function page(fetch, decode = async () => {}) {
+function page(fetch, decode = async () => {}, kind = 'character') {
   const events = {}, nodes = {};
   let reloads = 0, picks = 0, revoked = 0;
   const node = id => ({ disabled: false, inert: false, textContent: '', dataset: {}, addEventListener(event, handler) { events[`${id}:${event}`] = handler; } });
@@ -12,14 +12,26 @@ function page(fetch, decode = async () => {}) {
   nodes['character-generation-form'].dataset = { referenceId: '7', referenceUrl: '/projects/1/characters/2/reference-image' };
   Object.assign(nodes['character-reference-file'], { files: [new Blob(['png'], { type: 'image/png' })], value: 'selected.png', click() { picks++; } });
   nodes['upload-character-reference'].textContent = '替换图片'; nodes['clear-character-reference'].textContent = '移除参考图';
+  if (kind === 'scene') { nodes['character-generation-form'].dataset.kind = 'scene'; nodes['character-generation-form'].dataset.referenceUrl = '/projects/1/scenes/2/reference-image'; }
   runInNewContext(script, {
-    document: { getElementById: id => nodes[id] },
+    document: { getElementById: id => kind === 'scene' ? id.includes('character') ? undefined : nodes[id.replace('scene', 'character')] : nodes[id] },
     window: { location: { reload() { reloads++; } }, addEventListener(event, handler) { events[event] = handler; } },
     Image: class { naturalWidth = 16; naturalHeight = 9; decode = decode; },
     URL: { createObjectURL: () => 'blob:preview', revokeObjectURL() { revoked++; } }, fetch, FormData, URLSearchParams, TypeError, Error,
   });
   return { nodes, pick: () => events['upload-character-reference:click'](), upload: () => events['character-reference-file:change'](), clear: () => events['clear-character-reference:click'](), beforeUnload: event => events.beforeunload(event), reloads: () => reloads, picks: () => picks, revoked: () => revoked };
 }
+
+test('场景参考图上传／移除使用共享交互和场景路径，未保存资料拒绝上传，失败不重试也不触发生成', async () => {
+  let calls = 0; const p = page(async (url, options) => {
+    calls++; assert.equal(url, '/projects/1/scenes/2/reference-image'); assert.ok(options.body.get('referenceImage') instanceof Blob);
+    assert.equal(options.body.get('referenceId'), '7'); return { ok: true, json: async () => ({ referenceId: 8 }) };
+  }, undefined, 'scene');
+  p.nodes['character-form'].dataset.dirty = 'true'; await p.upload(); assert.equal(calls, 0); assert.match(p.nodes['character-generation-error'].textContent, /场景资料/);
+  p.nodes['character-form'].dataset.dirty = ''; await p.upload(); assert.equal(calls, 1); assert.equal(p.reloads(), 1);
+  const removal = page(async (url, options) => { assert.equal(url, '/projects/1/scenes/2/clear-reference'); assert.equal(options.body.toString(), 'referenceId=7'); throw new TypeError('network'); }, undefined, 'scene');
+  await removal.clear(); assert.equal(removal.reloads(), 0); assert.equal(removal.nodes['clear-character-reference'].disabled, false);
+});
 
 test('上传只打开选图器；保存参考图时锁定资料和生成操作、防重复上传，成功刷新以自动切换 API，不触发生图', async () => {
   let calls = 0, finish;
