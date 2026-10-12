@@ -50,7 +50,7 @@ function resourceTarget(choice = '17', index = 0) {
     '[data-source-quote]': node({ value: '林秋走出雨幕。' }),
   };
   return {
-    controls, dataset: { candidateIndex: String(index) },
+    controls, dataset: { candidateIndex: String(index), kind: 'character' },
     querySelector: selector => lookup(controls, selector),
     querySelectorAll(selector) {
       assert.equal(selector, '[data-resource-name], [data-resource-description]');
@@ -182,6 +182,65 @@ test('resource choices show and require new-resource fields only for new, withou
   }
   assert.equal(form.dataset.dirty, 'true');
   assert.equal(p.beforeUnload(), true);
+});
+
+test('同名新建项选中时共用先选的描述，编辑任一处同步共享描述，本场类型和说明不联动', async () => {
+  const form = resourceForm(['', '', '']), calls = [];
+  const [first, second, different] = form.targets;
+  first.dataset.kind = second.dataset.kind = different.dataset.kind = 'scene';
+  for (const target of [first, second]) target.controls['[data-resource-name]'].value = '洗手间';
+  different.controls['[data-resource-name]'].value = '走廊';
+  first.controls['[data-resource-description]'].value = '有镜子。';
+  second.controls['[data-resource-description]'].value = '镜面发黑，有洗手台。';
+  different.controls['[data-resource-description]'].value = '狭长走廊。';
+  second.controls['[data-resource-mode]'].value = 'imagination';
+  second.controls['[data-resource-details]'].value = '第二场灯光惨白。';
+  resourcesPage(async (url, options) => { calls.push(JSON.parse(options.body.get('selections'))); return ok({ redirect }); }, { forms: [form] });
+  for (const target of [first, second, different]) {
+    target.controls['[data-resource-choice]'].value = 'new';
+    form.fire('change', { target: target.controls['[data-resource-choice]'] });
+  }
+  assert.equal(second.controls['[data-resource-description]'].value, '有镜子。');
+  second.controls['[data-resource-description]'].value = '有镜子和洗手台。';
+  form.fire('input', { target: second.controls['[data-resource-description]'] });
+  assert.equal(first.controls['[data-resource-description]'].value, '有镜子和洗手台。');
+  assert.equal(different.controls['[data-resource-description]'].value, '狭长走廊。');
+  assert.equal(first.controls['[data-resource-mode]'].value, 'on_screen');
+  assert.equal(first.controls['[data-resource-details]'].value, '本场雨中出现');
+  await form.fire('submit');
+  assert.equal(calls.length, 1); assert.equal(calls[0][0].description, calls[0][1].description);
+  assert.equal(calls[0][1].mode, 'imagination'); assert.equal(calls[0][1].details, '第二场灯光惨白。');
+});
+
+test('同名新建描述按选择先后而非DOM顺序联动；人物与场景、已有档案和忽略项不受影响', () => {
+  const form = resourceForm(['', '', '17', 'ignore', '']);
+  const [first, second, existing, ignored, character] = form.targets;
+  for (const target of form.targets) target.controls['[data-resource-name]'].value = '同名';
+  for (const target of [first, second, existing, ignored]) target.dataset.kind = 'scene';
+  second.controls['[data-resource-description]'].value = '后面位置先被选择的描述。';
+  character.controls['[data-resource-description]'].value = '同名人物。';
+  resourcesPage(() => assert.fail('联动不发送请求'), { forms: [form] });
+  for (const target of [second, first, character]) {
+    target.controls['[data-resource-choice]'].value = 'new'; form.fire('change', { target: target.controls['[data-resource-choice]'] });
+  }
+  assert.equal(first.controls['[data-resource-description]'].value, '后面位置先被选择的描述。');
+  first.controls['[data-resource-description]'].value = '人工核对后的共享描述。';
+  form.fire('input', { target: first.controls['[data-resource-description]'] });
+  assert.equal(second.controls['[data-resource-description]'].value, '人工核对后的共享描述。');
+  assert.equal(existing.controls['[data-resource-description]'].value, '深色外套');
+  assert.equal(ignored.controls['[data-resource-description]'].value, '深色外套');
+  assert.equal(character.controls['[data-resource-description]'].value, '同名人物。');
+});
+
+test('明确改成不同的新资源名称后停止共享描述，重新改回同名才沿用已有新建描述', () => {
+  const form = resourceForm(['', '']); const [first, second] = form.targets;
+  resourcesPage(() => assert.fail('编辑不发送请求'), { forms: [form] });
+  for (const target of form.targets) { target.controls['[data-resource-choice]'].value = 'new'; form.fire('change', { target: target.controls['[data-resource-choice]'] }); }
+  second.controls['[data-resource-name]'].value = '明确不同的资源'; form.fire('change', { target: second.controls['[data-resource-name]'] });
+  second.controls['[data-resource-description]'].value = '不同资源的描述'; form.fire('input', { target: second.controls['[data-resource-description]'] });
+  assert.equal(first.controls['[data-resource-description]'].value, '深色外套');
+  second.controls['[data-resource-name]'].value = '  林秋 · 新档案  '; form.fire('change', { target: second.controls['[data-resource-name]'] });
+  assert.equal(second.controls['[data-resource-description]'].value, '深色外套');
 });
 
 test('candidate confirmation sends exact existing/new/ignore snapshots, locks all resource saves, clears dirty before redirect', async () => {

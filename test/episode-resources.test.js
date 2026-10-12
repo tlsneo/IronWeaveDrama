@@ -180,6 +180,20 @@ test('同批确认的同类同名新资源只建一次，描述不一致或已�
   const resources = snapshots(f.db); assert.equal((await f.confirm(duplicate)).status, 409); assert.deepEqual(snapshots(f.db), resources);
 });
 
+test('同场景跨场的不同模型描述明确指出冲突资源；统一共享描述后只建一份档案，各场说明独立保存', async t => {
+  const f = await fixture(t); f.db.exec('DELETE FROM scenes WHERE id = 1');
+  const returned = items.map((item, index) => item.kind === 'scene' ? { ...item, description: index === 1 ? '房间内有门。' : '房间内有椅子。' } : item);
+  f.result({ choices: [{ message: { content: JSON.stringify({ occurrences: returned }) }, finish_reason: 'stop' }] });
+  await extracted(f); const before = snapshots(f.db); const batch = f.state();
+  const failed = await f.confirm(); assert.equal(failed.status, 400); assert.match((await failed.json()).error, /场景「房间」.*描述不一致/);
+  assert.deepEqual(snapshots(f.db), before); assert.deepEqual(f.state(), batch);
+  const selections = f.selections(); for (const [index, item] of f.state().candidates.entries()) if (item.kind === 'scene') selections[index].description = '房间内有门和椅子。';
+  assert.equal((await f.confirm(selections)).status, 200);
+  const scene = f.db.prepare('SELECT * FROM scenes WHERE project_id = 1').all(); assert.equal(scene.length, 1); assert.equal(scene[0].description, '房间内有门和椅子。');
+  const occurrences = f.state().occurrences.filter(item => item.kind === 'scene'); assert.equal(occurrences.length, 2);
+  assert.ok(occurrences.every(item => item.scene_id === scene[0].id)); assert.deepEqual(occurrences.map(item => item.details), [items[1].details, items[3].details]);
+});
+
 test('同名已有资源有歧义时不自动选择；确认只接受当前项目资源和名称快照，失败不写半组关联', async t => {
   const f = await fixture(t); f.db.exec("INSERT INTO characters (project_id, name) VALUES (1, '林秋')");
   await extracted(f); assert.equal(f.state().candidates[0].suggestedId, null);

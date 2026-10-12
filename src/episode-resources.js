@@ -140,7 +140,7 @@ function selectResource(database, projectId, kind, selection, created) {
   const key = JSON.stringify([kind, name]);
   if (created.has(key)) {
     const earlier = created.get(key);
-    if (earlier.description !== description) reject(400, '同类同名的新建项会共用一个资源，请统一新建描述；不同资源请使用可区分的名称。');
+    if (earlier.description !== description) reject(400, `${kind === 'character' ? '角色' : '场景'}「${name}」的多处新建描述不一致。同一个资源应共用一份描述；若确为不同资源，请分别使用不同名称。`);
     return earlier.id;
   }
   if (resourceChoices(database, projectId, kind).some(row => row.name.trim().toLowerCase() === name.toLowerCase())) reject(409, '已有同名资源，请选择关联；确为不同资源时请使用可区分的名称。');

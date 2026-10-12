@@ -21,11 +21,29 @@
     for (const input of target.querySelectorAll('[data-resource-name], [data-resource-description]')) input.disabled = !visible;
     target.querySelector('[data-resource-name]').required = visible;
   }
+  function syncNewDescription(target, targets, edited = false) {
+    if (target.querySelector('[data-resource-choice]').value !== 'new') return;
+    const name = target.querySelector('[data-resource-name]').value.trim();
+    if (!name) return;
+    const peers = targets.filter(other => other !== target && other.dataset.kind === target.dataset.kind
+      && other.querySelector('[data-resource-choice]').value === 'new' && other.querySelector('[data-resource-name]').value.trim() === name);
+    const source = edited ? target : peers[0] ?? target;
+    const description = source.querySelector('[data-resource-description]').value;
+    for (const other of [target, ...peers]) other.querySelector('[data-resource-description]').value = description;
+  }
   for (const form of forms) {
     const targets = form.id === 'episode-resource-candidates' ? [...form.querySelectorAll('[data-resource-candidate]')].sort((a, b) => Number(a.dataset.candidateIndex) - Number(b.dataset.candidateIndex)) : [form];
     targets.forEach(showNew);
-    form.addEventListener('input', () => { form.dataset.dirty = 'true'; });
-    form.addEventListener('change', () => { form.dataset.dirty = 'true'; targets.forEach(showNew); });
+    form.addEventListener('input', event => {
+      form.dataset.dirty = 'true';
+      const target = targets.find(item => item.querySelector('[data-resource-description]') === event.target);
+      if (target) syncNewDescription(target, targets, true);
+    });
+    form.addEventListener('change', event => {
+      form.dataset.dirty = 'true'; targets.forEach(showNew);
+      const target = targets.find(item => item.querySelector('[data-resource-choice]') === event.target || item.querySelector('[data-resource-name]') === event.target);
+      if (target) syncNewDescription(target, targets);
+    });
     form.addEventListener('submit', async event => {
       event.preventDefault();
       const button = form.querySelector('[type="submit"]');

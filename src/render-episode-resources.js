@@ -40,7 +40,7 @@ export function renderEpisodeResources(database, projectId, episodeId, draft, co
   const candidates = batch.candidates.length ? `<form id="episode-resource-candidates" data-url="${base}/confirm-resources" data-batch-revision="${batch.revision}" data-script-revision="${batch.scriptRevision}">
     <h4>待确认的提取草稿 · ${candidateGroups.length} 项资源 · ${batch.candidates.length} 处画面出场</h4>
     ${batch.scriptRevision !== draft.revision ? '<p class="form-error">剧本已变化，这份草稿不能直接确认。请重新提取。</p>' : ''}
-    <p class="field-help">每项资源只列一次，下面保留各场的画面出场位置；每处关联仍可单独修正。已有档案只关联不修改，同名不同档案不合并。同类同名的新建项共用一个资源，请统一描述；不同资源请使用可区分的名称。</p>
+    <p class="field-help">每项资源只列一次，下面保留各场的画面出场位置；每处关联仍可单独修正。已有档案只关联不修改，同名不同档案不合并。同类同名且选择新建的项共用一份档案描述：后选的会沿用前一处，修改任一处描述会同步到同名新建项。画面类型和本场说明分别保存；确实不同的资源才使用不同名称。</p>
     ${candidateGroups.map(group => `<fieldset class="resource-candidate resource-group"><legend>${group.kind === 'character' ? '角色' : '场景'} · ${escapeHtml(group.name)} · ${group.items.length} 处 ${removeButton('candidates', group.items, group.name, true)}</legend>
       ${group.items.map(candidate => `<div class="resource-position" data-resource-candidate data-candidate-index="${candidate.index}" data-kind="${candidate.kind}">
         <p class="field-help resource-position-heading">${escapeHtml(candidate.sceneHeading || '未标场标题')} · ${occurrenceModes[candidate.mode]} · ${batch.scriptRevision === draft.revision ? `正文第 ${draft.script.slice(0, candidate.sourceStart).split('\n').length} 行起` : '旧版位置，待核对'} ${removeButton('candidates', [candidate], candidate.name)}</p><blockquote class="occurrence-quote">${escapeHtml(candidate.quote)}</blockquote>
