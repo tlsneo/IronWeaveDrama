@@ -3,6 +3,7 @@ import { test } from 'node:test';
 import { baseCharacterBoard } from '../prompts/character/base-board.js';
 import { referenceCharacterBoard } from '../prompts/character/reference-board.js';
 import { novelToScriptPrompt } from '../prompts/script/novel-to-script.js';
+import { episodeToShotsPrompt } from '../prompts/storyboard/episode-to-shots.js';
 
 test('采用 C 试写的戏剧化重构方法，允许新设计行动与互动，不逐段转录或逐项拍准备清单', () => {
   for (const rule of ['substantial dramatic reconstruction', 'not paragraph-by-paragraph transcription', 'central characters, relationships, motivations, main conflict, and emotional trajectory', 'merge, omit, or reorder events', 'design new actions and interactions', 'rewrite or add dialogue', 'small scenes compatible with the original story', 'actable drama', 'rather than assigning an action to every sentence', 'Do not film a preparation checklist item by item', 'explain everything through internal monologue', 'changes merely for the sake of changing things', 'Explain significant cuts, additions, and restructuring in notes']) assert.ok(novelToScriptPrompt.includes(rule), rule);
@@ -43,6 +44,24 @@ test('表达分析依据通用语义与上下文，不逐句保留，不把独�
   assert.match(novelToScriptPrompt, /Thought may be rewritten as action or genuine speech/);
   assert.match(novelToScriptPrompt, /Speech in an imagined scene remains imagined/);
   assert.doesNotMatch(novelToScriptPrompt, /Lu Mingfei|Chen Wenwen|Zhao Menghua|Nono|dandelion|cigarette|Wall-E|snowflake/i);
+});
+
+test('分镜先规划连续表演再切镜，静态信息不逐项计时，不为填镜补动作或重复反应', () => {
+  assert.ok(episodeToShotsPrompt.indexOf('CONTINUOUS PERFORMANCE FIRST') < episodeToShotsPrompt.indexOf('SHOT DESIGN'));
+  for (const rule of ['one continuous performance', 'Estimate\nthis performance first', 'A cut changes the view,\nnot the clock', 'Static information belongs in the composition', 'Do not invent gestures', 'no source event or information is lost', 'not its beginning', 'completed action or reaction must not be performed again', 'do not restart it as another full waiting beat', 'held state is valid', 'Do not force a new start/action/end']) assert.ok(episodeToShotsPrompt.includes(rule), rule);
+});
+
+test('单镜上限不是目标或片段最低时长，按并行表演计时，禁止固定总长及按比例硬配平', () => {
+  for (const rule of ['a ceiling, not a minimum or target', 'much shorter than the ceiling', 'not a video-generation request', 'Do not impose an episode runtime or shot-count quota', 'proportionally rescale', 'Do not make complex actions implausibly fast', 'not from the length of screenplay descriptions', 'Keep a consistent\nspeaking pace across cuts', 'not the sum of their full durations', 'Add only genuinely\nsequential time', 'Do not attach a separate establishment, reaction, or waiting', 'not a new utterance', 'never invent performance\nto rationalize a previously chosen number']) assert.ok(episodeToShotsPrompt.includes(rule), rule);
+  assert.doesNotMatch(episodeToShotsPrompt, /Around 3-4 spoken Chinese characters per second|130 seconds|120 seconds|60 seconds/);
+});
+
+test('分镜节奏修正仍保持英文通用指令、中文字段、原文及资源合同，不改剧本或额外增加模型阶段', () => {
+  assert.doesNotMatch(episodeToShotsPrompt, /[^\x00-\x7f]|Lu Mingfei|Chen Wenwen|Zhao Menghua|Nono|dandelion|cinema|Wall-E/i);
+  for (const rule of ['within this single response', 'Do not\nrewrite the accepted screenplay', 'original-language spoken words', 'Preserve wording', 'original punctuation/whitespace', 'only to cover successive parts', 'original scene heading', 'confirmed visual resource IDs', 'NO image pixels are supplied', 'on_screen, memory, or imagination', 'Do not count static details or completed events']) {
+    assert.ok(episodeToShotsPrompt.includes(rule), rule);
+  }
+  for (const field of ['title', 'sceneHeading', 'quote', 'mode', 'duration', 'characterIds', 'sceneId', 'framing', 'action', 'dialogue', 'sound', 'transition', 'timingReason']) assert.ok(episodeToShotsPrompt.includes(`- ${field}:`), field);
 });
 
 test('参考图模板以身份为锚，不复制衣服背景或原图构图；保留成人、画风和完整四视图合同', () => {
