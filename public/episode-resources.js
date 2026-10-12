@@ -67,7 +67,7 @@
       error.textContent = '还有未保存的剧本或关联修改，请先保存；若不保存，请先复制输入再刷新，然后删除。'; return;
     }
     const scope = button.dataset.whole === 'true' ? '这项在列表中的全部出场位置' : '这一处出场位置';
-    if (!window.confirm(`删除「${button.dataset.name}」的${scope}？只移除本集提取项／关联，不删除全剧共享档案，不影响其他集；移除决定会保留。`)) return;
+    if (!window.confirm(`删除「${button.dataset.name}」的${scope}？只移除本集提取项／关联，不删除全剧共享档案，不影响其他集。重新提取会重新显示本次模型识别的内容。`)) return;
     busy = true; main.inert = true; button.disabled = true;
     let redirect;
     try {

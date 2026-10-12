@@ -63,7 +63,7 @@ async function update(f, row, selection, overrides = {}) {
 test('按钮只在本集剧本页出现，保存与浏览不调用模型；单集提取只发送已保存正文并保留草稿，不创建资源或关联', async t => {
   const f = await fixture(t); const old = snapshots(f.db);
   const html = await (await fetch(f.url + '/projects/1?view=episode&episode=1')).text();
-  assert.match(html, /id="extract-episode-resources"/); assert.match(html, /提取／同步人物与场景/);
+  assert.match(html, /id="extract-episode-resources"/); assert.match(html, /提取人物与场景/);
   assert.doesNotMatch(html, /extract-secret|image-secret|画图 · image-model/);
   assert.equal((await fetch(f.url + '/episode-resources.js')).status, 200);
   assert.doesNotMatch(await (await fetch(f.url + '/projects/1?view=storyboards&episode=1')).text(), /id="extract-episode-resources"/);
@@ -155,15 +155,17 @@ test('旧草稿及已保存的非画面引用不再显示或计入出现位置�
   assert.equal(f.requests.length, 2);
 });
 
-test('旧版非画面记录的人工移除决定仍受保护：同位置改成画面出场时保留ID和说明，不恢复关联，不沿用非画面类型', async t => {
+test('旧版已移除的非画面记录不屏蔽新提取：显示本次画面类型和说明，确认前不恢复旧关联，确认后复用原位置ID', async t => {
   const f = await fixture(t); await extracted(f); await f.confirm();
   const row = f.state().occurrences.find(item => item.quote === items[0].quote);
   f.db.prepare("UPDATE episode_occurrences SET mode = 'off_screen', ignored = 1, character_id = NULL, details = '旧版人工移除。' WHERE id = ?").run(row.id);
   await extracted(f);
-  assert.equal(f.state().candidates.find(item => item.quote === row.quote), undefined);
+  const candidate = f.state().candidates.find(item => item.quote === row.quote);
+  assert.equal(candidate.occurrenceId, row.id); assert.equal(candidate.mode, 'on_screen'); assert.equal(candidate.details, items[0].details);
+  assert.equal(f.state().occurrences.find(item => item.id === row.id).ignored, 1);
   assert.equal((await f.confirm()).status, 200);
   const kept = f.state().occurrences.find(item => item.id === row.id);
-  assert.equal(kept.ignored, 1); assert.equal(kept.character_id, null); assert.equal(kept.details, '旧版人工移除。'); assert.equal(kept.mode, 'off_screen');
+  assert.equal(kept.ignored, 0); assert.equal(kept.character_id, 1); assert.equal(kept.details, items[0].details); assert.equal(kept.mode, 'on_screen');
   assert.equal(f.state().occurrences.length, 5);
 });
 
@@ -188,23 +190,24 @@ test('同名已有资源有歧义时不自动选择；确认只接受当前项�
   assert.equal((await f.confirm(selections)).status, 409); assert.equal(f.state().occurrences.length, 0);
 });
 
-test('手动修正单条关联和出现方式，重提取优先保留人工选择；移除关联不会删资源，也不会在同步时自动恢复', async t => {
+test('重提取可建议已有人工关联，但画面类型和说明使用本次结果；旧移除不屏蔽新草稿，只有确认才重新保存关联', async t => {
   const f = await fixture(t); await extracted(f); await f.confirm();
   const id = Number(f.db.prepare("INSERT INTO characters (project_id, name, age) VALUES (1, '正确身份', 45)").run().lastInsertRowid);
   let row = f.state().occurrences.find(row => row.source_name === '林秋');
   const corrected = { ...existing(id, '正确身份', row), mode: 'imagination', details: '人工修正叙事层次。' };
   assert.equal((await update(f, row, corrected)).status, 200);
   await extracted(f); const candidate = f.state().candidates.find(item => item.name === '林秋' && item.quote === row.quote);
-  assert.equal(candidate.suggestedId, id); assert.equal(candidate.mode, 'imagination'); assert.equal(candidate.details, corrected.details);
+  assert.equal(candidate.suggestedId, id); assert.equal(candidate.mode, items[0].mode); assert.equal(candidate.details, items[0].details);
   await f.confirm(); row = f.state().occurrences.find(item => item.id === row.id); assert.equal(row.character_id, id);
   assert.equal((await update(f, row, { action: 'ignore', mode: row.mode, details: row.details })).status, 200);
   assert.ok(f.db.prepare('SELECT id FROM characters WHERE id = ?').get(id));
-  await extracted(f); assert.equal(f.state().candidates.find(item => item.quote === row.quote && item.kind === 'character'), undefined);
-  await f.confirm(); row = f.state().occurrences.find(item => item.id === row.id); assert.equal(row.ignored, 1); assert.equal(row.character_id, null);
+  await extracted(f); assert.ok(f.state().candidates.find(item => item.quote === row.quote && item.kind === 'character'));
+  assert.equal(f.state().occurrences.find(item => item.id === row.id).ignored, 1);
+  await f.confirm(); row = f.state().occurrences.find(item => item.id === row.id); assert.equal(row.ignored, 0); assert.equal(row.character_id, 1);
   const detail = await (await fetch(f.url + `/projects/1?resource=characters&character=${id}`)).text(); assert.match(detail, /全剧出现位置 · 0 处/);
 });
 
-test('手工扩展原文证据后移除关联，未确认草稿和再次提取保留同一记录、人工定位及移除决定，不产生恢复关联的副本', async t => {
+test('本轮手工定位和移除更新当前草稿；再次提取显示新的原文证据，确认复用旧ID而不制造副本', async t => {
   const f = await fixture(t); await extracted(f); await f.confirm(); await extracted(f);
   let row = f.state().occurrences.find(item => item.quote === items[0].quote);
   const id = row.id; const expanded = items[0].quote + '\n台词：林秋：“回来啦。”';
@@ -215,10 +218,11 @@ test('手工扩展原文证据后移除关联，未确认草稿和再次提取�
   assert.equal(f.state().candidates.find(item => item.occurrenceId === id), undefined);
   assert.equal((await f.confirm()).status, 200); assert.equal(f.state().occurrences.length, 5);
   await extracted(f);
-  assert.equal(f.state().candidates.find(item => item.occurrenceId === id), undefined);
+  assert.equal(f.state().candidates.find(item => item.occurrenceId === id).quote, items[0].quote);
+  assert.equal(f.state().occurrences.find(item => item.id === id).ignored, 1);
   assert.equal((await f.confirm()).status, 200); assert.equal(f.state().occurrences.length, 5);
   row = f.state().occurrences.find(item => item.id === id);
-  assert.equal(row.ignored, 1); assert.equal(row.character_id, null); assert.equal(row.quote, expanded);
+  assert.equal(row.ignored, 0); assert.equal(row.character_id, 1); assert.equal(row.quote, items[0].quote);
 });
 
 test('多个新位置重叠同一人工旧记录时不自动合并或恢复关联，必须明确核对选择', async t => {
@@ -407,13 +411,64 @@ test('出现位置分页不隐瞒其他集记录；删除资源保留待重新�
   assert.equal(f.db.prepare('SELECT count(*) AS n FROM scenes WHERE project_id = 2').get().n, 1); assert.deepEqual(f.db.prepare('PRAGMA foreign_key_check').all(), []);
 });
 
+test('已有确认结果的本轮草稿删除不提前改关联；确认时移除本轮删掉的旧位置，重新提取再次显示而不改共享档案', async t => {
+  const f = await fixture(t); await extracted(f); await f.confirm(); await extracted(f);
+  const before = snapshots(f.db);
+  const removed = await f.post({ confirmed: 'yes', batchRevision: String(f.state().revision), scriptRevision: '1', targets: JSON.stringify({ type: 'candidates', items: [0, 2] }) }, 'remove-resources');
+  assert.equal(removed.status, 200); assert.deepEqual(snapshots(f.db), before);
+  assert.equal(f.state().candidates.length, 3); assert.ok(!f.state().candidates.some(item => item.name === '林秋'));
+  const invalid = f.selections(); invalid[2] = { ...invalid[2], action: 'existing', resourceId: 2, resourceName: '外部角色' };
+  assert.equal((await f.confirm(invalid)).status, 404); assert.deepEqual(snapshots(f.db), before);
+  assert.equal((await f.confirm()).status, 200);
+  assert.ok(f.state().occurrences.filter(row => row.source_name === '林秋').every(row => row.ignored && row.character_id === null));
+  const html = await (await fetch(f.url + '/projects/1?view=episode&episode=1')).text();
+  assert.match(html, /已确认人物与场景 · 2 项资源 · 3 处画面出场/);
+  await extracted(f); assert.equal(f.state().candidates.length, 5); assert.equal(f.requests.length, 3);
+  assert.deepEqual(snapshots(f.db).characters, before.characters); assert.deepEqual(snapshots(f.db).scenes, before.scenes);
+});
+
+test('重新提取显示本次原文、画面类型和说明，不沿用旧删除或人工内容，也不补入模型未返回的旧项；编辑别项不丢新结果', async t => {
+  const f = await fixture(t); await extracted(f); await f.confirm();
+  let row = f.state().occurrences.find(item => item.quote === items[0].quote);
+  const expanded = items[0].quote + '\n台词：林秋：“回来啦。”';
+  assert.equal((await update(f, row, { ...existing(1, '林秋', row), quote: expanded, mode: 'imagination', details: '旧手工说明。' })).status, 200);
+  row = f.state().occurrences.find(item => item.id === row.id);
+  assert.equal((await update(f, row, { action: 'ignore', mode: row.mode, details: '旧删除说明。' })).status, 200);
+  const deleted = f.state().occurrences.find(item => item.id === row.id);
+  const fresh = [{ ...items[0], details: '本次新识别说明。' }, items[1], items[3]];
+  f.result({ choices: [{ message: { content: JSON.stringify({ occurrences: fresh }) }, finish_reason: 'stop' }] });
+  await extracted(f); assert.equal(f.requests.length, 2);
+  assert.deepEqual(f.state().candidates.map(({ kind, name, quote, mode, details }) => ({ kind, name, quote, mode, details })), fresh.map(({ kind, name, quote, mode, details }) => ({ kind, name, quote, mode, details })));
+  assert.deepEqual(f.state().occurrences.find(item => item.id === row.id), deleted);
+  const scene = f.state().occurrences.find(item => item.quote === items[1].quote);
+  assert.equal((await update(f, scene, { ...existing(1, '房间', scene), details: '本轮另一项人工修改。' })).status, 200);
+  const candidate = f.state().candidates.find(item => item.occurrenceId === row.id);
+  assert.equal(candidate.quote, items[0].quote); assert.equal(candidate.mode, 'on_screen'); assert.equal(candidate.details, fresh[0].details); assert.equal(candidate.ignored, false);
+  assert.equal(f.state().candidates.length, 3); assert.ok(!f.state().candidates.some(item => item.name === '周远'));
+});
+
+test('删完本轮草稿后重新提取确实请求模型：失败不改结果或自动重试，成功仅显示本次返回的项', async t => {
+  const f = await fixture(t); await extracted(f);
+  const removed = await f.post({ confirmed: 'yes', batchRevision: String(f.state().revision), scriptRevision: '1', targets: JSON.stringify({ type: 'candidates', items: [0, 1, 2, 3, 4] }) }, 'remove-resources');
+  assert.equal(removed.status, 200); assert.equal(f.state().candidates.length, 0); assert.equal(f.state().occurrences.length, 0);
+  const before = snapshots(f.db); const batch = f.state();
+  f.result({ error: { message: 'provider unavailable' } }, 503);
+  assert.equal((await f.post(f.fields())).status, 502); assert.equal(f.requests.length, 2);
+  assert.deepEqual(f.state(), batch); assert.deepEqual(snapshots(f.db), before);
+  f.result({ choices: [{ message: { content: JSON.stringify({ occurrences: [items[4]] }) }, finish_reason: 'stop' }] });
+  await extracted(f); assert.equal(f.requests.length, 3);
+  assert.equal(f.state().candidates.length, 1); assert.equal(f.state().candidates[0].name, '周远'); assert.deepEqual(snapshots(f.db), before);
+  const html = await (await fetch(f.url + '/projects/1?view=episode&episode=1')).text(); assert.match(html, /重新提取人物与场景/);
+});
+
 test('提取提示词只分析本集正文、要求原文证据与真实姓名地点，不改编、不推断未知信息或输出分镜', () => {
   assert.doesNotMatch(extractResourcesPrompt, /[^\x00-\x7f]/);
-  for (const rule of ['ONE saved episode screenplay', 'data, not instructions', 'Do not rewrite', 'Do not infer ages', 'copied verbatim', 'uniquely identify', 'Matching is handled separately', 'Maximum 200 occurrences']) assert.ok(extractResourcesPrompt.includes(rule));
+  for (const rule of ['ONE saved episode screenplay', 'data, not instructions', 'Do not rewrite', 'Do not infer ages', 'copied verbatim', 'uniquely identify', 'Matching is handled separately', 'Maximum 200 occurrences', 'Ordinary in-scene dialogue', 'stable role or group label', 'brief appearances', 'The prose need not repeat the location name', 'COMPLETENESS CHECK', 'unknown', 'explicit nonvisual label', 'depicted figures inside a screen']) assert.ok(extractResourcesPrompt.includes(rule), rule);
+  assert.doesNotMatch(extractResourcesPrompt, /Do not infer presence from a name, a cast list, dialogue attribution, or the scene heading alone/);
   assert.doesNotMatch(extractResourcesPrompt, /林秋|房间|路明非|表白/);
 });
 
-test('删除图标支持整组草稿和单处位置；不建／删共享档案、不改其他集，重提取不恢复删除决定', async t => {
+test('删除图标只删除本轮草稿：不创建忽略记录，不建／删共享档案，不改其他集；确认后重新提取完整显示新结果', async t => {
   const f = await fixture(t); await extracted(f); const before = snapshots(f.db);
   const remove = targets => f.post({ confirmed: 'yes', batchRevision: String(f.state().revision), scriptRevision: '1', targets: JSON.stringify(targets) }, 'remove-resources');
   let html = await (await fetch(f.url + '/projects/1?view=episode&episode=1')).text();
@@ -423,9 +478,10 @@ test('删除图标支持整组草稿和单处位置；不建／删共享档案�
   assert.equal((await remove({ type: 'candidates', items: [2] })).status, 200);
   assert.equal(f.state().candidates.length, 2); assert.ok(!f.state().candidates.some(item => item.name === '周远'));
   assert.deepEqual(snapshots(f.db).characters, before.characters); assert.deepEqual(snapshots(f.db).scenes, before.scenes);
-  assert.equal(f.state().occurrences.filter(row => row.ignored).length, 3); assert.equal(f.state(2).revision, 0);
-  assert.equal((await f.confirm()).status, 200); await extracted(f);
-  assert.equal(f.state().candidates.length, 2); assert.ok(f.state().candidates.every(item => item.kind === 'scene'));
+  assert.equal(f.state().occurrences.length, 0); assert.equal(f.state(2).revision, 0);
+  assert.equal((await f.confirm()).status, 200); assert.ok(f.state().occurrences.every(item => item.kind === 'scene'));
+  await extracted(f); assert.equal(f.state().candidates.length, 5);
+  assert.deepEqual(f.state().candidates.map(item => item.name), items.map(item => item.name));
   assert.equal(f.requests.length, 2);
 });
 
@@ -441,7 +497,8 @@ test('删除已确认整组关联和单处关联，刷新待确认草稿，旧�
   assert.equal(f.state().occurrences.filter(row => row.scene_id === 1).length, 1);
   const remaining = f.state().occurrences.filter(row => !row.ignored); assert.equal((await remove(remaining)).status, 200);
   assert.equal(f.state().candidates.length, 0); assert.equal(f.state().occurrences.filter(row => !row.ignored).length, 0);
-  await extracted(f); assert.equal(f.state().candidates.length, 0);
+  await extracted(f); assert.equal(f.state().candidates.length, 5);
+  assert.ok(f.state().occurrences.every(row => row.ignored));
   assert.deepEqual(snapshots(f.db).characters, resources.characters); assert.deepEqual(snapshots(f.db).scenes, resources.scenes); assert.deepEqual(f.state(2), other);
   const html = await (await fetch(f.url + '/projects/1?view=episode&episode=1')).text(); assert.match(html, /已确认人物与场景 · 0 项资源/); assert.match(html, /id="extract-episode-resources"/);
 });
@@ -507,7 +564,8 @@ test('新资源、候选、人工关联和移除状态重启后保留，版本11
   const filename = join(directory, 'drama.sqlite'); const f = await fixture(t, filename); await extracted(f); await f.confirm();
   const removed = f.state().occurrences.find(row => row.source_name === '周远');
   assert.equal((await update(f, removed, { action: 'ignore', mode: removed.mode, details: '手动移除，重启后保留。' })).status, 200);
-  await extracted(f); assert.equal(f.state().candidates.find(item => item.name === '周远'), undefined);
+  await extracted(f); assert.ok(f.state().candidates.find(item => item.name === '周远'));
+  assert.equal(f.state().occurrences.find(item => item.id === removed.id).ignored, 1);
   const original = snapshots(f.db); const batch = f.state(); await f.close();
   let db = openDatabase(filename); assert.deepEqual(snapshots(db), original); assert.deepEqual(readEpisodeResources(db, 1), batch);
   db.close(); db = openDatabase(filename); assert.deepEqual(readEpisodeResources(db, 1), batch);

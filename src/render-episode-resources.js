@@ -75,11 +75,11 @@ export function renderEpisodeResources(database, projectId, episodeId, draft, co
     return resourceGroups(rows, choices).map(group => `<fieldset class="resource-candidate resource-group"><legend>${group.kind === 'character' ? '角色' : '场景'} · ${escapeHtml(group.name)} · ${group.items.length} 处 ${group.items.some(row => !row.ignored) ? removeButton('occurrences', group.items.filter(row => !row.ignored), group.name, true) : ''}</legend>${group.items.map(record).join('')}</fieldset>`).join('');
   }
   return `<section id="episode-resources" class="creation-panel episode-resources-panel" aria-labelledby="episode-resources-title">
-    <div class="episode-resource-heading"><h3 id="episode-resources-title">本集人物与场景</h3><button id="extract-episode-resources" class="create-button" type="button" data-url="${base}/extract-resources" data-batch-revision="${batch.revision}" data-has-candidates="${batch.candidates.length > 0}" ${configs.length ? '' : 'disabled'}>提取／同步人物与场景</button></div>
-    <p class="field-help">只提取本集已保存剧本中实际呈现的人物和地点；仅被提及、只有声音或文字而未出镜的不列入。回忆／想象画面真正出场的保留。点击才调用所选模型，不改已有档案或其他集。</p>
+    <div class="episode-resource-heading"><h3 id="episode-resources-title">本集人物与场景</h3><button id="extract-episode-resources" class="create-button" type="button" data-url="${base}/extract-resources" data-batch-revision="${batch.revision}" data-has-candidates="${batch.candidates.length > 0}" ${configs.length ? '' : 'disabled'}>${batch.revision ? '重新提取人物与场景' : '提取人物与场景'}</button></div>
+    <p class="field-help">只提取本集已保存剧本中实际呈现的人物和地点；仅被提及、只有声音或文字而未出镜的不列入。回忆／想象画面真正出场的保留。每次点击都重新调用所选模型，显示本次识别结果；删除只影响当前结果，不屏蔽下一次提取。不改已有档案或其他集。</p>
     <p id="episode-resource-remove-error" class="form-error" role="alert"></p>
     ${candidates}
-    ${batch.candidates.length ? '<details class="resource-review"><summary>查看同步前已确认的资源</summary>' : ''}
+    ${batch.candidates.length ? '<details class="resource-review"><summary>查看重新提取前已确认的资源</summary>' : ''}
     <h4>已确认人物与场景 · ${resourceGroups(current, choices).length} 项资源 · ${current.length} 处画面出场</h4>
     ${records(current) || '<p class="field-help">还没有已确认的画面出场资源。提取后先核对，再确认关联或新建。</p>'}
     ${batch.candidates.length ? '</details>' : ''}
