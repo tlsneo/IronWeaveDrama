@@ -14,7 +14,7 @@ import { saveEpisodeScript, generateEpisodeScript } from './episode-scripts.js';
 import { extractEpisodeResources, confirmEpisodeResources, updateEpisodeOccurrence, removeEpisodeResources } from './episode-resources.js';
 import { saveScene, findScene, renderScenes } from './scenes.js';
 import { generateSceneImage, clearSceneImage, saveSceneReference, clearSceneReference } from './scene-images.js';
-import { saveEpisodeStoryboards, generateEpisodeStoryboards } from './storyboards.js';
+import { saveEpisodeStoryboards, generateEpisodeStoryboards, clearEpisodeStoryboards } from './storyboards.js';
 
 const resourceTypes = new Map([
   ['characters', { name: '角色', description: '管理这部短剧的基础角色与参考图' }],
@@ -102,7 +102,7 @@ export function createApp(database) {
     const deleteConfigRoute = path.match(/^\/settings\/api\/([1-9]\d*)\/delete$/);
     const creationRoute = path.match(/^\/projects\/([1-9]\d*)\/(seasons|episodes)(?:\/([1-9]\d*)(\/move)?)?$/);
     const scriptRoute = path.match(/^\/projects\/([1-9]\d*)\/episodes\/([1-9]\d*)\/(script|generate-script)$/);
-    const storyboardRoute = path.match(/^\/projects\/([1-9]\d*)\/episodes\/([1-9]\d*)\/(storyboards|generate-storyboards)$/);
+    const storyboardRoute = path.match(/^\/projects\/([1-9]\d*)\/episodes\/([1-9]\d*)\/(storyboards|generate-storyboards|clear-storyboards)$/);
     const extractionRoute = path.match(/^\/projects\/([1-9]\d*)\/episodes\/([1-9]\d*)\/(extract-resources|confirm-resources|remove-resources|resource-occurrences\/([1-9]\d*))$/);
     const sceneRoute = path.match(/^\/projects\/([1-9]\d*)\/scenes(?:\/([1-9]\d*))?$/);
     const characterRoute = path.match(/^\/projects\/([1-9]\d*)\/characters(?:\/([1-9]\d*))?$/);
@@ -122,9 +122,12 @@ export function createApp(database) {
       }
       if (storyboardRoute && request.method === 'POST') {
         const [projectId, id] = storyboardRoute.slice(1, 3).map(Number);
-        const form = await readForm(request, storyboardRoute[3] === 'storyboards' ? 1024 * 1024 : 32768);
+        const action = storyboardRoute[3];
+        const form = await readForm(request, action === 'storyboards' ? 1024 * 1024 : action === 'clear-storyboards' ? 8192 : 32768);
         if (![projectId, id].every(Number.isSafeInteger)) { json(404, { error: '集不存在' }); return; }
-        json(200, storyboardRoute[3] === 'storyboards' ? saveEpisodeStoryboards(database, projectId, id, form) : await generateEpisodeStoryboards(database, projectId, id, form)); return;
+        json(200, action === 'storyboards' ? saveEpisodeStoryboards(database, projectId, id, form)
+          : action === 'clear-storyboards' ? clearEpisodeStoryboards(database, projectId, id, form)
+            : await generateEpisodeStoryboards(database, projectId, id, form)); return;
       }
       if (extractionRoute && request.method === 'POST') {
         const [projectId, id] = extractionRoute.slice(1, 3).map(Number);

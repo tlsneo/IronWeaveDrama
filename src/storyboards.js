@@ -93,6 +93,17 @@ export function saveEpisodeStoryboards(database, projectId, episodeId, form) {
     return { ...store(database, episodeId, before, shots, !!shots.length), redirect: `/projects/${projectId}?view=storyboards&episode=${episodeId}` };
   });
 }
+export function clearEpisodeStoryboards(database, projectId, episodeId, form) {
+  findEpisode(database, projectId, episodeId); assertEpisodeScriptsIdle(database, [episodeId]);
+  return inTransaction(database, () => {
+    const current = database.prepare('SELECT revision FROM episode_storyboards WHERE episode_id = ?').get(episodeId)?.revision ?? 0;
+    if (integer(form, 'revision') !== current) reject(409, '分镜已变化，请先保留输入，再刷新核对；没有删除镜头。');
+    if (form.getAll('confirmed').length !== 1 || form.get('confirmed') !== 'yes') reject(400, '删除本集全部镜头须明确确认。');
+    const revision = current ? current + 1 : 0;
+    if (current) database.prepare("UPDATE episode_storyboards SET shots = '[]', reviewed = 0, revision = ? WHERE episode_id = ?").run(revision, episodeId);
+    return { revision, message: '本集全部镜头已删除，剧本、资源和其他集未修改。', redirect: `/projects/${projectId}?view=storyboards&episode=${episodeId}` };
+  });
+}
 export async function generateEpisodeStoryboards(database, projectId, episodeId, form) {
   const before = snapshots(database, projectId, episodeId, form);
   if (!before.script.script.trim() || before.script.script.length > 60000) reject(400, '请先保存本集剧本正文（最多 60000 字），再生成分镜。');

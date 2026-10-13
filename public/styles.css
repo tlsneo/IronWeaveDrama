@@ -438,7 +438,7 @@ h2 { margin: 0; font-size: 23px; font-weight: 600; line-height: 1.5; }
   .storyboard-fields { grid-template-columns: minmax(0, 1fr); }
   .storyboard-fields > * { grid-column: 1; }
   .storyboard-toolbar .form-field, .storyboard-toolbar .form-field:first-child { flex: 1 1 100%; }
-  .storyboard-toolbar .create-button, .storyboard-footer button { flex: 1 1 100%; }
+  .storyboard-toolbar button, .storyboard-footer button { flex: 1 1 100%; }
   .storyboard-shot-duration { flex-basis: 100%; margin-left: 22px; }
   #storyboard-dirty { margin-left: 0; }
 }

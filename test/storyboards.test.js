@@ -308,6 +308,7 @@ test('共用本集锁防重复付费，同时阻止剧本保存／生成／提�
   const f = await fixture(t), started = f.pause(), pending = f.generate(); await started;
   const paths = [
     ['generate-storyboards', f.generation()], ['storyboards', { ...f.fields(), shots: JSON.stringify(shots) }],
+    ['clear-storyboards', { revision: String(f.state().revision), confirmed: 'yes' }],
     ['script', { source: '原文', script: '修改', notes: '', revision: '1' }],
     ['generate-script', { revision: '1', apiConfigId: '1', model: 'storyboard-model', baseUrl: f.generation().baseUrl, replaceConfirmed: 'yes' }],
     ['extract-resources', { revision: '1', batchRevision: '0', apiConfigId: '1', model: 'storyboard-model', baseUrl: f.generation().baseUrl }],
@@ -340,14 +341,55 @@ test('全剧仅累计已核对且脚本与资源当前的分镜，完整计数�
   for (const [seconds, expected] of [[0, '0 秒'], [0.1, '0.1 秒'], [59.9, '59.9 秒'], [60, '1 分 0 秒'], [61.2, '1 分 1.2 秒'], [120, '2 分 0 秒']]) assert.equal(formatStoryboardDuration(seconds), expected);
 });
 
-test('两个路由拒绝跨项目／跨站／格式错误／重复字段／超大请求，不付费、不写数据、不泄漏密钥', async t => {
+test('删除全部镜头只清空本集并立即持久化，保留时长设置、剧本、档案、图片和其他集；不调用模型', async t => {
+  const f = await fixture(t);
+  f.db.exec("INSERT INTO character_references (character_id, image, mime, width, height) VALUES (1, x'00', 'image/png', 1, 1); INSERT INTO scene_references (scene_id, image, mime, width, height) VALUES (1, x'00', 'image/png', 1, 1);");
+  f.db.prepare('UPDATE episode_scripts SET script = ? WHERE episode_id = 2').run(script);
+  assert.equal((await f.save(shots, 1, { maxShotSeconds: '6' })).status, 200);
+  assert.equal((await f.save(shots.map(shot => ({ ...shot, characterIds: [], sceneId: null })), 2)).status, 200);
+  const original = f.row(), other = f.state(2), unchanged = immutable(f.db);
+  const media = ['character_references', 'scene_references', 'api_configs'].map(table => f.db.prepare(`SELECT * FROM ${table} ORDER BY id`).all());
+  const response = await f.post({ revision: '1', confirmed: 'yes' }, 'clear-storyboards'); assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { revision: 2, message: '本集全部镜头已删除，剧本、资源和其他集未修改。', redirect: '/projects/1?view=storyboards&episode=1' });
+  assert.deepEqual({ ...f.row() }, { ...original, revision: 2, reviewed: 0, shots: '[]' });
+  assert.deepEqual(f.state().shots, []); assert.equal(f.state().maxShotSeconds, 6); assert.deepEqual(f.state(2), other);
+  assert.deepEqual(immutable(f.db), unchanged);
+  assert.deepEqual(['character_references', 'scene_references', 'api_configs'].map(table => f.db.prepare(`SELECT * FROM ${table} ORDER BY id`).all()), media);
+  assert.equal(summary(f).plannedEpisodes, 1); assert.equal(summary(f).unplannedEpisodes, 1); assert.equal(summary(f).shotCount, 2); assert.equal(summary(f).totalSeconds, 7.3);
+  assert.equal((await f.save(shots, 1, { revision: '1' })).status, 409, 'old page cannot restore a deleted plan');
+  assert.equal((await f.save()).status, 200); const newer = f.row();
+  assert.equal((await f.post({ revision: '2', confirmed: 'yes' }, 'clear-storyboards')).status, 409, 'old clear request cannot delete a new plan');
+  assert.deepEqual(f.row(), newer); assert.equal(f.requests.length, 0);
+});
+
+test('旧版、失效依据和无剧本的分镜也能明确清空；无保存记录时可丢弃本地镜头，不重置版本', async t => {
+  const f = await fixture(t);
+  assert.equal((await f.post({ revision: '0', confirmed: 'yes' }, 'clear-storyboards')).status, 200); assert.equal(f.row(), undefined);
+  assert.equal((await f.save()).status, 200);
+  f.db.exec("UPDATE episode_scripts SET script = '', revision = 2 WHERE episode_id = 1; DELETE FROM characters WHERE id = 1; DELETE FROM scenes WHERE id = 1;");
+  const unchanged = immutable(f.db);
+  assert.equal((await f.post({ revision: '1', confirmed: 'yes' }, 'clear-storyboards')).status, 200);
+  assert.deepEqual(f.state().shots, []); assert.equal(f.state().revision, 2); assert.deepEqual(immutable(f.db), unchanged); assert.equal(f.requests.length, 0);
+});
+
+test('删除全部镜头必须明确确认且版本有效，缺失／否定／重复确认与非法版本都不能修改数据', async t => {
   const f = await fixture(t); assert.equal((await f.save()).status, 200); const original = f.row();
-  for (const action of ['storyboards', 'generate-storyboards']) {
-    const fields = action === 'storyboards' ? { ...f.fields(), shots: JSON.stringify(shots) } : f.generation();
+  for (const form of [{ revision: '1' }, { revision: '1', confirmed: 'no' }, { confirmed: 'yes' }, { revision: '-1', confirmed: 'yes' }, { revision: '1.5', confirmed: 'yes' }]) {
+    assert.equal((await f.post(form, 'clear-storyboards')).status, 400); assert.deepEqual(f.row(), original);
+  }
+  assert.equal((await f.post({ revision: '0', confirmed: 'yes' }, 'clear-storyboards')).status, 409);
+  assert.deepEqual(f.row(), original); assert.equal(f.requests.length, 0);
+});
+
+test('三个路由拒绝跨项目／跨站／格式错误／重复字段／超大请求，不付费、不写数据、不泄漏密钥', async t => {
+  const f = await fixture(t); assert.equal((await f.save()).status, 200); const original = f.row();
+  for (const action of ['storyboards', 'generate-storyboards', 'clear-storyboards']) {
+    const fields = action === 'storyboards' ? { ...f.fields(), shots: JSON.stringify(shots) }
+      : action === 'clear-storyboards' ? { revision: String(f.state().revision), confirmed: 'yes' } : f.generation();
     for (const [project, episode] of [[2, 1], [1, 3], [1, 99999], [1, '9007199254740992']]) assert.equal((await f.post(fields, action, episode, project)).status, 404);
     for (const headers of [{ Origin: 'https://other.example' }, { 'Sec-Fetch-Site': 'cross-site' }]) assert.equal((await f.post(fields, action, 1, 1, { headers })).status, 403);
     assert.equal((await f.post(fields, action, 1, 1, { headers: { 'Content-Type': 'application/json' } })).status, 415);
-    assert.equal((await f.post({ huge: 'x'.repeat(action === 'storyboards' ? 1024 * 1024 + 1 : 33000) }, action)).status, 413);
+    assert.equal((await f.post({ huge: 'x'.repeat(action === 'storyboards' ? 1024 * 1024 + 1 : action === 'clear-storyboards' ? 8193 : 33000) }, action)).status, 413);
     for (const field of Object.keys(fields)) {
       const duplicate = new URLSearchParams(fields); duplicate.append(field, fields[field]);
       assert.ok([400, 409].includes((await f.post(duplicate, action)).status), `${action}: duplicate ${field}`);

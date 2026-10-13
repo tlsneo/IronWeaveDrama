@@ -4,7 +4,7 @@
   const main = document.querySelector('main');
   const get = id => document.getElementById(`storyboard-${id}`);
   const list = get('shots'), template = get('shot-template'), maxSeconds = get('max-seconds');
-  const api = get('api'), generate = get('generate'), save = get('save'), add = get('add');
+  const api = get('api'), generate = get('generate'), save = get('save'), add = get('add'), clear = get('clear');
   const error = get('error'), status = get('status'), recovery = get('recovery'), recoveryText = get('recovery-text');
   const textFields = ['title', 'sceneHeading', 'quote', 'mode', 'framing', 'action', 'dialogue', 'sound', 'transition', 'timingReason'];
   const cards = () => [...list.querySelectorAll('[data-storyboard-shot]')];
@@ -38,6 +38,7 @@
     get('total').textContent = `本集计划估算 ${Math.floor(ticks / 600)} 分 ${((ticks % 600) / 10).toFixed(1)} 秒（非实际片长）`;
     get('empty').hidden = shots.length > 0;
     add.disabled = shots.length >= 300;
+    clear.disabled = shots.length === 0 && form.dataset.hasShots !== 'true';
     get('duration-error').textContent = !validMax ? '单镜头上限必须是 1–15 秒的整数。'
       : overflow ? `有镜头超过 ${max} 秒上限，请手动修改；已有时长未自动更改。`
         : invalid ? '镜头时长必须大于 0，并以 0.1 秒为步进。' : '';
@@ -81,26 +82,30 @@
     if (!result || !Number.isSafeInteger(result.revision) || result.revision < 0) throw new TypeError('分镜版本响应无效');
     return result;
   }
-  async function run(generating) {
-    const active = generating ? generate : save;
+  async function run(action) {
+    const generating = action === 'generate', clearing = action === 'clear';
+    const active = clearing ? clear : generating ? generate : save;
     if (busy || main.inert || active.disabled) return;
     error.textContent = ''; status.textContent = '';
-    if (form.dataset.hasScript !== 'true') { error.textContent = '请先到剧本页保存本集剧本正文。'; return; }
+    if (!clearing && form.dataset.hasScript !== 'true') { error.textContent = '请先到剧本页保存本集剧本正文。'; return; }
     const max = Number(maxSeconds.value);
-    if (!Number.isInteger(max) || max < 1 || max > 15) { refresh(); maxSeconds.focus(); return; }
+    if (!clearing && (!Number.isInteger(max) || max < 1 || max > 15)) { refresh(); maxSeconds.focus(); return; }
     let replacement = false;
-    if (generating) {
+    if (clearing) {
+      if (!window.confirm('删除本集全部已保存镜头及当前未保存编辑？确认后立即生效，无需再保存，无法撤销。不会删除剧本、人物、场景、图片或其他集的镜头，也不会调用模型。')) return;
+    } else if (generating) {
       if (!api.value || !api.selectedOptions[0]) { error.textContent = '请选择大语言模型配置。'; api.focus(); return; }
       replacement = form.dataset.hasShots === 'true' || cards().length > 0 || form.dataset.dirty === 'true';
       if (replacement && !window.confirm('本次生成会调用模型，可能计费。成功后替换已有镜头及未保存修改；不会先自动保存，失败保留输入。是否继续？')) return;
     } else if (!validateSave()) return;
-    const body = new URLSearchParams({ revision: form.dataset.revision, scriptRevision: form.dataset.scriptRevision,
-      resourceRevision: form.dataset.resourceRevision, maxShotSeconds: String(max) });
+    const body = clearing ? new URLSearchParams({ revision: form.dataset.revision, confirmed: 'yes' })
+      : new URLSearchParams({ revision: form.dataset.revision, scriptRevision: form.dataset.scriptRevision,
+        resourceRevision: form.dataset.resourceRevision, maxShotSeconds: String(max) });
     if (generating) {
       const option = api.selectedOptions[0];
       body.set('apiConfigId', api.value); body.set('model', option.dataset.model); body.set('baseUrl', option.dataset.baseUrl);
       body.set('replaceConfirmed', replacement ? 'yes' : 'no');
-    } else {
+    } else if (!clearing) {
       const shots = shotsPayload(), json = JSON.stringify(shots);
       if (shots.length > 300 || json.length > 512000) { error.textContent = '最多 300 镜头，镜头 JSON 不得超过 512000 字符。'; return; }
       body.set('shots', json);
@@ -108,29 +113,36 @@
     if (!recovery.hidden && recoveryText.value && !window.confirm('本页还有未保存的模型返回文本。继续操作可能替换或清除它；请先复制保留，确认放弃后再继续。是否继续？')) return;
     const label = active.textContent;
     busy = true; main.inert = true; active.disabled = true;
-    active.textContent = generating ? '生成中…' : '保存中…';
-    status.textContent = generating ? '正在生成文字分镜，请勿重复提交或离开。' : '正在确认保存分镜…';
+    active.textContent = clearing ? '删除中…' : generating ? '生成中…' : '保存中…';
+    status.textContent = clearing ? '正在删除本集全部镜头…' : generating ? '正在生成文字分镜，请勿重复提交或离开。' : '正在确认保存分镜…';
     let result;
     try {
-      result = await post(generating ? form.dataset.generateUrl : form.dataset.url, body);
+      result = await post(clearing ? form.dataset.clearUrl : generating ? form.dataset.generateUrl : form.dataset.url, body);
       form.dataset.revision = String(result.revision); form.dataset.dirty = '';
-      recovery.hidden = true; recoveryText.value = ''; status.textContent = result.message || '分镜已保存。';
+      recovery.hidden = true; recoveryText.value = ''; status.textContent = result.message || (clearing ? '本集全部镜头已删除。' : '分镜已保存。');
     } catch (failure) {
       status.textContent = '';
       error.textContent = failure instanceof TypeError
         ? generating ? '未收到生成结果，请先复制当前输入，再刷新或查看服务商记录；请求可能已计费，不要直接重复提交。'
-          : '保存结果未确认，请先复制保留当前输入，再刷新核对。'
+          : clearing ? '删除结果未确认，当前编辑仍保留；请先复制，再刷新核对，不要重复提交。'
+            : '保存结果未确认，请先复制保留当前输入，再刷新核对。'
         : failure.message;
     } finally {
       busy = false; main.inert = false; active.disabled = false; active.textContent = label;
     }
     if (result) {
+      if (clearing) {
+        cards().forEach(card => card.remove());
+        form.dataset.hasShots = 'false'; form.dataset.stale = 'false';
+        save.disabled = false; generate.textContent = '生成分镜'; get('dirty').textContent = '本集镜头已清空'; refresh();
+      }
       window.location.hash = typeof result.redirect === 'string' ? result.redirect.split('#')[1] || '' : '';
       window.location.reload();
     }
   }
-  form.addEventListener('submit', event => { event.preventDefault(); return run(false); });
-  generate.addEventListener('click', () => run(true));
+  form.addEventListener('submit', event => { event.preventDefault(); return run('save'); });
+  generate.addEventListener('click', () => run('generate'));
+  clear.addEventListener('click', () => run('clear'));
   form.addEventListener('input', event => { if (event.target !== api) changed(); });
   form.addEventListener('change', event => { if (event.target !== api) changed(); });
   add.addEventListener('click', () => {

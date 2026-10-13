@@ -54,10 +54,10 @@ function card(shot = {}) {
   return result;
 }
 function page(fetch, { shots = [], confirmed = true, stale = false, revision = '0', hasScript = true, hasShots = shots.length > 0 } = {}) {
-  const names = ['form', 'shots', 'shot-template', 'max-seconds', 'api', 'generate', 'save', 'add', 'error', 'status', 'recovery', 'recovery-text', 'count', 'total', 'empty', 'dirty', 'duration-error'];
+  const names = ['form', 'shots', 'shot-template', 'max-seconds', 'api', 'generate', 'save', 'add', 'clear', 'error', 'status', 'recovery', 'recovery-text', 'count', 'total', 'empty', 'dirty', 'duration-error'];
   const nodes = Object.fromEntries(names.map(name => [name, node()])), events = {}, main = { inert: false }, confirmations = [], reloads = [];
   const form = nodes.form, list = nodes.shots;
-  form.dataset = { url: `${base}/storyboards`, generateUrl: `${base}/generate-storyboards`, revision,
+  form.dataset = { url: `${base}/storyboards`, generateUrl: `${base}/generate-storyboards`, clearUrl: `${base}/clear-storyboards`, revision,
     scriptRevision: '4', resourceRevision: 'resources-current', hasShots: String(hasShots), stale: String(stale), hasScript: String(hasScript) };
   list.items = shots.map(card); list.items.forEach(item => { item.parent = list; });
   list.querySelectorAll = selector => { assert.equal(selector, '[data-storyboard-shot]'); return list.items; };
@@ -66,21 +66,75 @@ function page(fetch, { shots = [], confirmed = true, stale = false, revision = '
   nodes['shot-template'].content = { firstElementChild: card({ mode: 'on_screen', characterIds: [], sceneId: null }) };
   nodes['max-seconds'].value = '5';
   Object.assign(nodes.api, { value: '3', selectedOptions: [{ dataset: { model: 'shot-model', baseUrl: 'https://model.test/v1' } }] });
-  nodes.generate.textContent = '生成分镜'; nodes.save.textContent = '确认并保存分镜'; nodes.recovery.hidden = true;
+  nodes.generate.textContent = '生成分镜'; nodes.save.textContent = '确认并保存分镜'; nodes.clear.textContent = '删除全部镜头'; nodes.recovery.hidden = true;
   runInNewContext(browserScript, {
     document: { getElementById(id) { assert.ok(id.startsWith('storyboard-')); assert.ok(nodes[id.slice(11)], `Unknown id: ${id}`); return nodes[id.slice(11)]; },
       querySelector(selector) { assert.equal(selector, 'main'); return main; } },
-    window: { confirm(message) { confirmations.push(message); return confirmed; }, addEventListener(event, handler) { events[event] = handler; },
+    window: { confirm(message) { confirmations.push(message); return typeof confirmed === 'function' ? confirmed(message) : confirmed; }, addEventListener(event, handler) { events[event] = handler; },
       location: { hash: '', reload() { assert.equal(main.inert, false); assert.equal(nodes.generate.disabled, false); assert.equal(nodes.save.disabled, false);
         reloads.push({ hash: this.hash, guarded: leave(events.beforeunload) }); } } },
     fetch, URLSearchParams, TypeError, Error,
   });
   return { nodes, form, list, main, confirmations, reloads,
-    generate: () => nodes.generate.fire('click'), save: () => form.fire('submit'), add: () => nodes.add.fire('click'),
+    generate: () => nodes.generate.fire('click'), save: () => form.fire('submit'), add: () => nodes.add.fire('click'), clear: () => nodes.clear.fire('click'),
     input(input, value, event = 'input') { input.value = String(value); return form.fire(event, { target: input }); },
     action(item, action) { return list.fire('click', { target: item.actions[action] }); },
     beforeUnload: () => leave(events.beforeunload) };
 }
+
+test('clear all deletes immediately after confirmation, including stale/invalid and local-only shots; locks duplicates and updates totals only after success', async () => {
+  for (const revision of ['0', '8']) {
+    const calls = []; let finish;
+    const p = page((url, options) => { calls.push({ url, body: options.body }); return new Promise(resolve => { finish = resolve; }); },
+      { shots: [goodShot(), goodShot('第二镜')], hasShots: revision !== '0', revision, stale: true, hasScript: false });
+    p.nodes.save.disabled = true; p.nodes.api.value = ''; p.input(p.nodes['max-seconds'], '0');
+    p.list.items[0].fields.title.invalid = true;
+    const pending = p.clear();
+    assert.equal(p.confirmations.length, 1); assert.match(p.confirmations[0], /本集全部已保存镜头.*立即生效.*无法撤销/);
+    assert.match(p.confirmations[0], /不会删除剧本.*其他集.*不会调用模型/);
+    assert.equal(p.main.inert, true); assert.equal(p.nodes.clear.textContent, '删除中…'); assert.equal(p.list.items.length, 2);
+    await p.clear(); await p.generate(); await p.save(); p.add();
+    assert.equal(calls.length, 1); assert.equal(calls[0].url, `${base}/clear-storyboards`);
+    assert.deepEqual(Object.fromEntries(calls[0].body), { revision, confirmed: 'yes' });
+    assert.equal(p.beforeUnload(), true);
+    finish(ok({ revision: revision === '0' ? 0 : 9, message: '本集全部镜头已删除' })); await pending;
+    assert.equal(p.list.items.length, 0); assert.equal(p.nodes.count.textContent, '0 镜头'); assert.match(p.nodes.total.textContent, /0 分 0\.0 秒/);
+    assert.equal(p.nodes.empty.hidden, false); assert.equal(p.nodes.clear.disabled, true);
+    assert.equal(p.nodes.clear.textContent, '删除全部镜头'); assert.equal(p.form.dataset.stale, 'false');
+    assert.equal(p.form.dataset.dirty, ''); assert.equal(p.form.dataset.hasShots, 'false'); assert.equal(p.beforeUnload(), false);
+    assert.deepEqual(p.reloads, [{ hash: '', guarded: false }]);
+    await p.clear(); assert.equal(calls.length, 1);
+  }
+});
+
+test('clear all cancellation preserves everything; empty page disables it, adding local shots enables it, paid recovery needs separate discard consent', async () => {
+  const p = page(() => assert.fail('cancel must not submit'), { shots: [goodShot()], confirmed: false });
+  p.input(p.list.items[0].fields.title, '保留未保存编辑'); p.nodes.recovery.hidden = false; p.nodes['recovery-text'].value = '付费返回文本';
+  await p.clear(); assert.equal(p.list.items.length, 1); assert.equal(p.list.items[0].fields.title.value, '保留未保存编辑');
+  assert.equal(p.nodes['recovery-text'].value, '付费返回文本'); assert.equal(p.beforeUnload(), true); assert.equal(p.reloads.length, 0);
+  const empty = page(() => assert.fail('empty/cancelled page must not submit'), { confirmed: false });
+  assert.equal(empty.nodes.clear.disabled, true); await empty.clear(); assert.equal(empty.confirmations.length, 0);
+  empty.add(); assert.equal(empty.nodes.clear.disabled, false); await empty.clear(); assert.equal(empty.list.items.length, 1);
+  let confirmations = 0;
+  const recovery = page(() => assert.fail('recovery cancellation must not submit'), { shots: [goodShot()], confirmed: () => ++confirmations === 1 });
+  recovery.nodes.recovery.hidden = false; recovery.nodes['recovery-text'].value = '付费返回文本';
+  await recovery.clear(); assert.equal(confirmations, 2); assert.match(recovery.confirmations[1], /复制.*放弃/);
+  assert.equal(recovery.list.items.length, 1); assert.equal(recovery.nodes['recovery-text'].value, '付费返回文本'); assert.equal(recovery.beforeUnload(), true);
+});
+
+test('clear all failure/conflict/unknown result retains edits, snapshots and paid recovery without retry or fake success', async () => {
+  for (const response of [failed({ error: '分镜已变化，没有删除镜头' }), ok({}), null]) {
+    let calls = 0;
+    const p = page(async () => { calls++; if (!response) throw new TypeError('network'); return response; }, { shots: [goodShot()], revision: '7' });
+    p.input(p.list.items[0].fields.title, '保留编辑'); p.nodes.recovery.hidden = false; p.nodes['recovery-text'].value = '付费返回文本';
+    await p.clear(); assert.equal(calls, 1); assert.equal(p.list.items[0].fields.title.value, '保留编辑');
+    assert.equal(p.form.dataset.revision, '7'); assert.equal(p.form.dataset.hasShots, 'true'); assert.equal(p.form.dataset.dirty, 'true');
+    assert.equal(p.nodes.count.textContent, '1 镜头'); assert.equal(p.nodes.recovery.hidden, false); assert.equal(p.nodes['recovery-text'].value, '付费返回文本');
+    assert.equal(p.main.inert, false); assert.equal(p.nodes.clear.disabled, false); assert.equal(p.nodes.clear.textContent, '删除全部镜头');
+    assert.equal(p.reloads.length, 0); assert.equal(p.beforeUnload(), true); assert.match(p.nodes.error.textContent, /分镜已变化|删除结果未确认/);
+    assert.doesNotMatch(p.nodes.error.textContent, /可能已计费/);
+  }
+});
 
 test('first generation submits only current snapshots and selected LLM, revision zero valid; locks duplicates, then reloads after unlock', async () => {
   const calls = []; let finish;
@@ -306,6 +360,9 @@ test('renderer opens directly into planning with current snapshots and escaped r
   assert.match(html, /&lt;编剧&gt; · shot-model/); assert.match(html, /data-storyboard-field="sceneId"[\s\S]*?<option value="20"[^>]*>&lt;客厅&gt;<\/option>/);
   assert.match(html, /data-storyboard-field="quote"/); assert.match(html, /根据本集已保存剧本和已确认资源生成分镜/);
   assert.match(html, /未规划 2 集 · 旧版 0 集 · 待确认 0 集/);
+  assert.match(html, /data-clear-url="\/projects\/1\/episodes\/1\/clear-storyboards"/);
+  assert.match(html, /id="storyboard-clear"[^>]*type="button"[^>]*disabled>删除全部镜头/);
+  assert.ok(html.indexOf('id="storyboard-clear"') < html.indexOf('id="storyboard-shots"'), 'clear action is above the long shot list');
   assert.throws(() => renderStoryboards(db, 2, 1), /集不存在/);
 });
 
@@ -322,6 +379,7 @@ test('saved shots render all fields, exact scene headings, first expanded previe
   assert.match(html, /id="storyboard-stale"/); assert.match(html, /data-stale="true"/);
   assert.match(html, /已失效场景 #20/); assert.match(html, /&lt;危险标题&gt;/);
   assert.match(html, /id="storyboard-save"[^>]*disabled/); assert.match(html, /旧版 1 集/);
+  assert.doesNotMatch(html, /id="storyboard-clear"[^>]*disabled/);
 });
 
 test('legacy malformed mode is shown as invalid rather than silently selecting reality; viewing never rewrites it', t => {
