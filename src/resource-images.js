@@ -11,7 +11,7 @@ const kinds = {
   character: { table: 'characters', images: 'character_boards', references: 'character_references', column: 'character_id', label: '角色', imageLabel: '角色板' },
   scene: { table: 'scenes', images: 'scene_images', references: 'scene_references', column: 'scene_id', label: '场景', imageLabel: '场景参考图' },
 };
-const sizes = { '16:9': '2560x1440', '9:16': '1440x2560', '21:9': '2688x1152', '4:3': '2048x1536', '3:4': '1536x2048', '1:1': '2048x2048' };
+export const imageSizes = { '16:9': '2560x1440', '9:16': '1440x2560', '21:9': '2688x1152', '4:3': '2048x1536', '3:4': '1536x2048', '1:1': '2048x2048' };
 const generating = new WeakMap();
 function reject(status, message) { throw Object.assign(new Error(message), { status }); }
 function find(kind, database, projectId, id) {
@@ -83,7 +83,7 @@ export async function generateResourceImage(kind, database, projectId, id, form)
   const key = `${kind}:${id}`; assertResourceImagesIdle(kind, database, [id]); active.add(key);
   try {
     const ratio = kind === 'character' ? '16:9' : project.aspect_ratio;
-    const size = sizes[ratio];
+    const size = imageSizes[ratio];
     const identity = Object.fromEntries(characterFields.filter(field => item[field.column] !== null && item[field.column] !== undefined && item[field.column] !== '').map(field => [field.label, item[field.column]]));
     const prompt = kind === 'character'
       ? `MANDATORY ART STYLE / 画风: ${project.style}\nApply the style only to rendering, line quality and surface treatment. Do not import costumes, scenery, props or dramatic lighting from style conventions.\n\nADULT CHARACTER IDENTITY / 成年角色基础外观:\n${JSON.stringify(identity, null, 2)}\n\n${(reference ? referenceCharacterBoard : baseCharacterBoard).prompt}`

@@ -15,6 +15,11 @@ test('版本 9 升级保留原项目、角色板及配置，新增空参考图�
   try {
     database = openDatabase(filename);
     database.exec(`
+      DROP TABLE look_images;
+      DROP TABLE look_assets;
+      DROP TABLE looks;
+      DROP TABLE production_asset_images;
+      DROP TABLE production_assets;
       DROP TABLE episode_storyboards;
       DROP TABLE episode_occurrences;
       DROP TABLE episode_extractions;
@@ -42,7 +47,7 @@ test('版本 9 升级保留原项目、角色板及配置，新增空参考图�
     assert.equal(database.prepare("SELECT name FROM sqlite_master WHERE name = 'character_references'").get(), undefined);
     database.close();
     database = openDatabase(filename);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 15);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 16);
     original[2] = original[2].map(row => Object.assign(Object.create(null), row, { reference_id: null }));
     assert.deepEqual(snapshot(database), original);
     assert.equal(database.prepare('SELECT count(*) AS n FROM character_references').get().n, 0);

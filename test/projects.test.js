@@ -77,20 +77,20 @@ test('项目卡片进入对应创作页，可直接访问或刷新，项目资�
   }
 });
 
-test('四类资源入口可切换，当前分类被选中，折叠菜单保持原生键盘操作', async () => {
+test('五类资源入口可切换，当前分类被选中，折叠菜单保持原生键盘操作', async () => {
   const project = await (await createProject({ name: '分类工作台', style: '写实电影', aspectRatio: '9:16' })).json();
-  for (const [type, name] of [['characters', '角色'], ['scenes', '场景'], ['props', '道具'], ['costumes', '服饰']]) {
+  for (const [type, name] of [['characters', '角色'], ['scenes', '场景'], ['props', '道具'], ['costumes', '服饰'], ['looks', '定妆']]) {
     const response = await fetch(`${baseUrl}/projects/${project.id}?resource=${type}`);
     assert.equal(response.status, 200);
     const html = await response.text();
     assert.ok(html.includes(`<h2 id="resource-title">${name}</h2>`));
-    assert.ok(html.includes(`还没有${name}资源`));
+    assert.ok(html.includes(['characters', 'scenes'].includes(type) ? `还没有${name}资源` : `尚无${name}`));
     assert.ok(html.includes(`href="?resource=${type}" aria-current="page"`));
     assert.equal((html.match(/aria-current="page"/g) ?? []).length, 1);
     assert.match(html, /<summary>资源库<\/summary>/);
     assert.match(html, /演员资源/);
     assert.match(html, /美术资源/);
-    assert.doesNotMatch(html, /<!-- (?:PROJECT|RESOURCE|CHARACTERS|SCENES|PROPS|COSTUMES)_/);
+    assert.doesNotMatch(html, /<!-- (?:PROJECT|RESOURCE|CHARACTERS|SCENES|PROPS|COSTUMES|LOOKS)_/);
   }
   for (const type of ['unknown', 'toString', '']) {
     assert.equal((await fetch(`${baseUrl}/projects/${project.id}?resource=${type}`)).status, 404);

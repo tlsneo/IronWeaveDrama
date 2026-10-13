@@ -35,7 +35,7 @@ export async function renderCharacters(database, projectId, project, query) {
     const adult = Number.isSafeInteger(character.age) && character.age >= 18;
     const content = `<div class="character-editor">
       <form id="character-form" data-url="/projects/${projectId}/characters/${id}" aria-label="角色基础外观">
-        <div class="character-edit-toolbar"><a class="episode-back" href="${base}">← 角色库</a><div class="item-actions"><button class="create-button" type="submit">保存资料</button>${deleteButton(`/projects/${projectId}/characters/${id}/delete`, character.name, `确定删除角色“${character.name}”？角色资料及全部图片将一并删除，无法恢复。`)}</div></div>
+        <div class="character-edit-toolbar"><a class="episode-back" href="${base}">← 角色库</a><div class="item-actions"><button class="create-button" type="submit">保存资料</button>${deleteButton(`/projects/${projectId}/characters/${id}/delete`, character.name, `确定删除角色“${character.name}”？角色资料、基础图片及其全部定妆和定妆照将一并删除，无法恢复；共享服饰和道具不会删除。`)}</div></div>
         <p id="character-error" class="form-error" role="alert"></p>
         ${groups.map(group => `<fieldset class="character-fieldset"><legend>${group}</legend><div class="character-fields">${characterFields.filter(field => field.group === group).map(field => renderField(field, character)).join('')}</div></fieldset>`).join('')}
       </form>
@@ -97,7 +97,7 @@ export async function renderCharacters(database, projectId, project, query) {
           <span class="character-status">${character.board_id ? '角色板已生成 · 待检查' : '未生成角色板'}</span>
         </div>
       </a>
-      <div class="card-actions">${deleteButton(`/projects/${projectId}/characters/${character.id}/delete`, character.name, `确定删除角色“${character.name}”？角色资料及全部图片将一并删除，无法恢复。`)}</div>
+      <div class="card-actions">${deleteButton(`/projects/${projectId}/characters/${character.id}/delete`, character.name, `确定删除角色“${character.name}”？角色资料、基础图片及其全部定妆和定妆照将一并删除，无法恢复；共享服饰和道具不会删除。`)}</div>
     </article>`).join('')}</div>`;
   } else if (search) {
     list = '<section class="studio-empty"><h3>没有匹配的角色</h3><p>可以更换名称搜索，或清除筛选。</p></section>';

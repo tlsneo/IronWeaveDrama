@@ -433,7 +433,7 @@ test('版本 7 升级保留旧图片，默认不清空；升级失败回滚，�
   let database;
   try {
     database = openDatabase(filename);
-    database.exec('DROP TABLE episode_storyboards; DROP TABLE scene_images; DROP TABLE scene_references; DROP TABLE episode_occurrences; DROP TABLE episode_extractions; DROP TABLE scenes; DROP TABLE episode_scripts; ALTER TABLE character_boards DROP COLUMN reference_id; DROP TABLE character_references;');
+    database.exec('DROP TABLE look_images; DROP TABLE look_assets; DROP TABLE looks; DROP TABLE production_asset_images; DROP TABLE production_assets; DROP TABLE episode_storyboards; DROP TABLE scene_images; DROP TABLE scene_references; DROP TABLE episode_occurrences; DROP TABLE episode_extractions; DROP TABLE scenes; DROP TABLE episode_scripts; ALTER TABLE character_boards DROP COLUMN reference_id; DROP TABLE character_references;');
     database.exec("INSERT INTO projects VALUES (1, '原项目', '写实', '9:16'); INSERT INTO characters (id, project_id, name, age) VALUES (1, 1, '原角色', 28); ALTER TABLE character_boards DROP COLUMN cleared; PRAGMA user_version = 7;");
     database.prepare('INSERT INTO character_boards (character_id, image, mime, width, height, valid, revision, model, prompt) VALUES (1, ?, ?, 16, 9, 1, ?, ?, ?)').run(png(), 'image/png', 'old-revision', 'old-model', 'old-prompt');
     const original = database.prepare('SELECT * FROM character_boards').get();
@@ -447,7 +447,7 @@ test('版本 7 升级保留旧图片，默认不清空；升级失败回滚，�
     assert.deepEqual(database.prepare('SELECT * FROM character_boards').get(), original);
     database.close();
     database = openDatabase(filename);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 15);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 16);
     assert.deepEqual({ ...database.prepare('SELECT * FROM character_boards').get() }, { ...original, cleared: 0, reference_id: null });
     database.exec('UPDATE character_boards SET cleared = 1');
     database.close();
@@ -463,7 +463,7 @@ test('版本 6 升级保留所有项目、角色和 API；迁移失败完整回�
   let database;
   try {
     database = openDatabase(filename);
-    database.exec("DROP TABLE episode_storyboards; DROP TABLE scene_images; DROP TABLE scene_references; DROP TABLE episode_occurrences; DROP TABLE episode_extractions; DROP TABLE scenes; DROP TABLE episode_scripts; DROP TABLE character_boards; DROP TABLE character_references; PRAGMA user_version = 6; INSERT INTO projects VALUES (1, '原项目', '水墨', '9:16'); INSERT INTO characters (id, project_id, name, age) VALUES (1, 1, '原角色', 28); INSERT INTO api_configs (name, type, base_url, api_key, model) VALUES ('接口', 'text_to_image', 'https://example.test/v1', 'preserved-key', 'preserved-model');");
+    database.exec("DROP TABLE look_images; DROP TABLE look_assets; DROP TABLE looks; DROP TABLE production_asset_images; DROP TABLE production_assets; DROP TABLE episode_storyboards; DROP TABLE scene_images; DROP TABLE scene_references; DROP TABLE episode_occurrences; DROP TABLE episode_extractions; DROP TABLE scenes; DROP TABLE episode_scripts; DROP TABLE character_boards; DROP TABLE character_references; PRAGMA user_version = 6; INSERT INTO projects VALUES (1, '原项目', '水墨', '9:16'); INSERT INTO characters (id, project_id, name, age) VALUES (1, 1, '原角色', 28); INSERT INTO api_configs (name, type, base_url, api_key, model) VALUES ('接口', 'text_to_image', 'https://example.test/v1', 'preserved-key', 'preserved-model');");
     const original = ['projects', 'characters', 'api_configs'].map(table => database.prepare(`SELECT * FROM ${table}`).all());
     database.close();
     const exec = DatabaseSync.prototype.exec;
@@ -475,7 +475,7 @@ test('版本 6 升级保留所有项目、角色和 API；迁移失败完整回�
     assert.equal(database.prepare("SELECT name FROM sqlite_master WHERE name = 'character_boards'").get(), undefined);
     database.close();
     database = openDatabase(filename);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 15);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 16);
     assert.deepEqual(['projects', 'characters', 'api_configs'].map(table => database.prepare(`SELECT * FROM ${table}`).all()), original);
     assert.equal(database.prepare('SELECT count(*) AS count FROM character_boards').get().count, 0);
   } finally { t.mock.restoreAll(); database?.close(); await rm(directory, { recursive: true, force: true }); }

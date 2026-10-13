@@ -283,6 +283,61 @@ export function openDatabase(filename) {
         PRAGMA user_version = 15;
       `);
     }
+    if (database.prepare('PRAGMA user_version').get().user_version < 16) {
+      database.exec(`
+        CREATE TABLE production_assets (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          kind TEXT NOT NULL CHECK (kind IN ('props', 'costumes')),
+          name TEXT NOT NULL,
+          description TEXT NOT NULL DEFAULT '',
+          revision INTEGER NOT NULL DEFAULT 1 CHECK (typeof(revision) = 'integer' AND revision > 0)
+        );
+        CREATE INDEX production_assets_project ON production_assets (project_id, kind, id);
+        CREATE TABLE production_asset_images (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          asset_id INTEGER NOT NULL REFERENCES production_assets(id) ON DELETE CASCADE,
+          image BLOB NOT NULL,
+          mime TEXT NOT NULL CHECK (mime IN ('image/png', 'image/jpeg', 'image/webp')),
+          width INTEGER NOT NULL CHECK (width > 0),
+          height INTEGER NOT NULL CHECK (height > 0),
+          cleared INTEGER NOT NULL DEFAULT 0 CHECK (cleared IN (0, 1)),
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX production_asset_images_current ON production_asset_images (asset_id, cleared, id);
+        CREATE TABLE looks (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          character_id INTEGER REFERENCES characters(id) ON DELETE CASCADE,
+          name TEXT NOT NULL,
+          prompt TEXT NOT NULL DEFAULT '',
+          revision INTEGER NOT NULL DEFAULT 1 CHECK (typeof(revision) = 'integer' AND revision > 0)
+        );
+        CREATE INDEX looks_project ON looks (project_id, id);
+        CREATE TABLE look_assets (
+          look_id INTEGER NOT NULL REFERENCES looks(id) ON DELETE CASCADE,
+          asset_id INTEGER NOT NULL REFERENCES production_assets(id) ON DELETE CASCADE,
+          PRIMARY KEY (look_id, asset_id)
+        );
+        CREATE TABLE look_images (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          look_id INTEGER NOT NULL REFERENCES looks(id) ON DELETE CASCADE,
+          image BLOB NOT NULL,
+          mime TEXT NOT NULL CHECK (mime IN ('image/png', 'image/jpeg', 'image/webp')),
+          width INTEGER NOT NULL CHECK (width > 0),
+          height INTEGER NOT NULL CHECK (height > 0),
+          valid INTEGER NOT NULL CHECK (valid IN (0, 1)),
+          cleared INTEGER NOT NULL DEFAULT 0 CHECK (cleared IN (0, 1)),
+          revision TEXT NOT NULL,
+          model TEXT NOT NULL,
+          prompt TEXT NOT NULL,
+          inputs_json TEXT NOT NULL,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX look_images_current ON look_images (look_id, valid, cleared, id);
+        PRAGMA user_version = 16;
+      `);
+    }
     if (database.prepare('PRAGMA foreign_key_check').all().length) throw new Error('数据库关系检查失败，升级已回滚。');
     database.exec('COMMIT');
     database.exec('PRAGMA foreign_keys = ON');
