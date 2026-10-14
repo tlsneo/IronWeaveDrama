@@ -15,7 +15,7 @@ function detailId(query, key, label) {
 }
 function deleteResource(url, item, kind) {
   const consequence = kind === 'looks'
-    ? '定妆资料及其全部生成图将删除，无法恢复；不会删除基础演员、服饰或道具。'
+    ? '定妆资料及其全部生成图将删除，无法恢复；已关联分镜的定妆选择会失效，需重新选择或取消；不会删除基础演员、服饰或道具。'
     : '素材资料和参考图片将删除，无法恢复；已有定妆将解除这项素材关联，旧生成图保留为旧依据待核对。';
   return deleteButton(`${url}/${item.id}/delete`, item.name, `确定删除${labels[kind]}“${item.name}”（#${item.id}）？${consequence}`);
 }
@@ -140,5 +140,5 @@ export function renderLooks(db, projectId, query) {
       <p class="field-help">无效／已清除图片仍可查看，不作为当前图；清除不删除历史。</p>
       ${history.length ? `<ul>${history.map(image => `<li><a href="${detail}/images/${image.id}" target="_blank" rel="noopener">查看图片 #${image.id}</a><span>${!image.valid ? '无效' : '有效'}${image.cleared ? ' · 已清除' : ''}${image.revision !== inputs.revision ? ' · 旧依据待核对' : ''} · ${html(image.width)} × ${html(image.height)} · ${html(image.model)} · ${html(image.created_at)}</span></li>`).join('')}</ul>` : '<p class="field-help">尚无生成图片。</p>'}
     </section>${renderImageDialog(editConfigs, 'look')}</section>`;
-  return { title: look.name, description: `独立定妆库 · #${id} · 一个基础演员，可选多件服饰与道具；暂不绑定本集或分镜。`, actions: '', content };
+  return { title: look.name, description: `独立定妆库 · #${id} · 一个基础演员，可选多件服饰与道具；可在分镜出镜角色旁手动关联。`, actions: '', content };
 }

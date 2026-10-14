@@ -31,6 +31,15 @@
       const group = card.querySelector('[data-storyboard-scene]');
       group.textContent = heading || '尚未填写场标题'; group.hidden = index > 0 && heading === previousHeading;
       previousHeading = heading;
+      const actors = new Set([...card.querySelectorAll('[data-storyboard-character]')].filter(input => input.checked).map(input => input.value));
+      for (const select of card.querySelectorAll('[data-storyboard-look]')) {
+        select.disabled = !actors.has(select.dataset.characterId);
+        const link = card.querySelector(`[data-storyboard-look-preview="${select.dataset.characterId}"]`);
+        const url = select.selectedOptions[0]?.dataset.imageUrl ?? '';
+        const prefix = form.dataset.url.split('/episodes/')[0] + '/looks/';
+        link.hidden = select.disabled || !url.startsWith(prefix) || !/^\/projects\/[1-9]\d*\/looks\/[1-9]\d*\/images\/[1-9]\d*$/.test(url);
+        link.setAttribute('href', link.hidden ? '' : url);
+      }
       card.querySelector('[data-storyboard-action="up"]').disabled = index === 0;
       card.querySelector('[data-storyboard-action="down"]').disabled = index === shots.length - 1;
     });
@@ -52,6 +61,10 @@
       const shot = Object.fromEntries(textFields.map(name => [name, field(card, name).value]));
       shot.duration = Number(field(card, 'duration').value);
       shot.characterIds = [...card.querySelectorAll('[data-storyboard-character]')].filter(input => input.checked).map(input => Number(input.value));
+      shot.characterLooks = [...card.querySelectorAll('[data-storyboard-look]')].filter(select => !select.disabled && select.value).map(select => {
+        const option = select.selectedOptions[0].dataset, imageId = Number(option.imageId);
+        return { characterId: Number(select.dataset.characterId), lookId: Number(option.lookId), inputRevision: option.inputRevision, imageId: imageId === 0 ? null : imageId };
+      });
       shot.sceneId = field(card, 'sceneId').value === '' ? null : Number(field(card, 'sceneId').value);
       return shot;
     });
@@ -60,6 +73,13 @@
     if (form.dataset.stale === 'true') { error.textContent = '剧本或资源已变化，旧版不能直接确认；请先复制保留，再依据当前版本重新生成。'; return false; }
     if (!refresh()) { error.textContent = get('duration-error').textContent; return false; }
     for (const card of cards()) {
+      for (const select of card.querySelectorAll('[data-storyboard-look]')) {
+        if (select.disabled || !select.value) continue;
+        const option = select.selectedOptions[0]?.dataset ?? {}, imageId = Number(option.imageId);
+        if (!Number.isSafeInteger(Number(option.lookId)) || Number(option.lookId) < 1 || !Number.isSafeInteger(imageId) || imageId < 0 || !/^[a-f0-9]{64}$/.test(option.inputRevision ?? '')) {
+          card.querySelector('details').open = true; select.focus(); error.textContent = '定妆版本无效，请重新选择或取消关联。'; return false;
+        }
+      }
       for (const input of card.querySelectorAll('[data-storyboard-field]')) {
         if (!input.checkValidity()) {
           card.querySelector('details').open = true; input.focus(); input.reportValidity();
@@ -96,7 +116,7 @@
     } else if (generating) {
       if (!api.value || !api.selectedOptions[0]) { error.textContent = '请选择大语言模型配置。'; api.focus(); return; }
       replacement = form.dataset.hasShots === 'true' || cards().length > 0 || form.dataset.dirty === 'true';
-      if (replacement && !window.confirm('本次生成会调用模型，可能计费。成功后替换已有镜头及未保存修改；不会先自动保存，失败保留输入。是否继续？')) return;
+      if (replacement && !window.confirm('本次生成会调用模型，可能计费。成功后替换已有镜头、定妆选择及未保存修改；不会自动迁移定妆选择，也不会先自动保存，失败保留输入。是否继续？')) return;
     } else if (!validateSave()) return;
     const body = clearing ? new URLSearchParams({ revision: form.dataset.revision, confirmed: 'yes' })
       : new URLSearchParams({ revision: form.dataset.revision, scriptRevision: form.dataset.scriptRevision,

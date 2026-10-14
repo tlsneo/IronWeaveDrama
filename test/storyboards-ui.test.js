@@ -5,6 +5,8 @@ import { runInNewContext } from 'node:vm';
 import { openDatabase } from '../src/database.js';
 import { renderStoryboards } from '../src/render-storyboards.js';
 import { saveEpisodeStoryboards, storyboardResources } from '../src/storyboards.js';
+import { storyboardLookChoices } from '../src/storyboard-looks.js';
+import { lookInputs } from '../src/looks.js';
 
 const browserScript = await readFile(new URL('../public/storyboards.js', import.meta.url), 'utf8');
 const base = '/projects/1/episodes/2';
@@ -29,11 +31,22 @@ function card(shot = {}) {
   const fields = Object.fromEntries(fieldNames.filter(name => name !== 'characterIds').map(name => [name, node({ value: String(shot[name] ?? ''),
     checkValidity() { return !this.invalid && (!['title', 'sceneHeading', 'quote', 'framing', 'action', 'timingReason', 'duration'].includes(name) || !!this.value.trim()); } })]));
   const characters = [17, 18, 999].map(id => node({ value: String(id), checked: shot.characterIds?.includes(id) ?? false }));
+  const previews = characters.map(() => node({ hidden: true }));
+  const looks = characters.map((character, index) => {
+    const saved = shot.characterLooks?.find(binding => binding.characterId === Number(character.value));
+    const imageId = saved ? saved.imageId : 700 + index;
+    const option = { value: `look-${index}`, dataset: { lookId: String(saved?.lookId ?? 70 + index), inputRevision: saved?.inputRevision ?? 'a'.repeat(64), imageId: String(imageId ?? 0), imageUrl: imageId === null ? '' : `/projects/1/looks/${saved?.lookId ?? 70 + index}/images/${imageId}` } };
+    const select = node({ value: saved ? option.value : '', dataset: { characterId: character.value }, options: [{ value: '', dataset: {} }, option] });
+    Object.defineProperty(select, 'selectedOptions', { get() { return [this.options.find(option => option.value === this.value) ?? this.options[0]]; } });
+    return select;
+  });
   const parts = Object.fromEntries(['number', 'title', 'duration', 'scene'].map(name => [`[data-storyboard-${name}]`, node()]));
   parts.details = node({ open: true });
   const actions = Object.fromEntries(['up', 'down', 'delete'].map(action => [action, node({ dataset: { storyboardAction: action } })]));
-  const result = node({ fields, characters, parts, actions,
+  const result = node({ fields, characters, looks, previews, parts, actions,
     querySelector(selector) {
+      const previewId = /^\[data-storyboard-look-preview="(\d+)"\]$/.exec(selector)?.[1];
+      if (previewId) return previews[characters.findIndex(character => character.value === previewId)];
       const name = /^\[data-storyboard-field="(\w+)"\]$/.exec(selector)?.[1];
       if (name) { assert.ok(fields[name], `Unknown field: ${name}`); return fields[name]; }
       const action = /^\[data-storyboard-action="(\w+)"\]$/.exec(selector)?.[1];
@@ -42,6 +55,7 @@ function card(shot = {}) {
     },
     querySelectorAll(selector) {
       if (selector === '[data-storyboard-field]') return Object.values(fields);
+      if (selector === '[data-storyboard-look]') return looks;
       assert.equal(selector, '[data-storyboard-character]'); return characters;
     },
     cloneNode() { return card(shot); },
@@ -158,10 +172,50 @@ test('manual confirmation sends all shot fields, numeric duration/resource IDs a
   assert.equal(p.beforeUnload(), true); assert.equal(p.nodes.dirty.textContent, '有未保存修改');
   await p.save(); assert.equal(calls.length, 1); assert.equal(calls[0].url, `${base}/storyboards`);
   const body = calls[0].body, shots = JSON.parse(body.get('shots'));
-  assert.deepEqual(shots, [{ ...goodShot(), title: '人工改稿', sceneId: null }]);
+  assert.deepEqual(shots, [{ ...goodShot(), title: '人工改稿', sceneId: null, characterLooks: [] }]);
   assert.equal(body.get('revision'), '1'); assert.equal(body.get('scriptRevision'), '4'); assert.equal(body.get('resourceRevision'), 'resources-current');
   assert.equal(body.get('maxShotSeconds'), '5'); assert.equal(body.has('apiConfigId'), false); assert.equal(body.has('replaceConfirmed'), false);
   assert.equal(p.form.dataset.dirty, ''); assert.equal(p.beforeUnload(), false); assert.equal(p.reloads.length, 1);
+});
+
+test('manual look selection sends numeric per-visible-actor snapshots, keeps text and duration unchanged, no paid request or auto-selection', async () => {
+  const calls = [], p = page(async (url, options) => { calls.push({ url, body: options.body }); return ok({ revision: 2 }); }, { shots: [goodShot()], revision: '1' });
+  const item = p.list.items[0], select = item.looks[0];
+  assert.equal(select.disabled, false); assert.equal(item.looks[2].disabled, true); assert.equal(select.value, '');
+  p.input(select, select.options[1].value, 'change'); assert.equal(item.previews[0].hidden, false);
+  assert.equal(item.previews[0].attributes.href, '/projects/1/looks/70/images/700'); assert.equal(p.beforeUnload(), true);
+  await p.save(); assert.equal(calls.length, 1); assert.equal(calls[0].url, `${base}/storyboards`); assert.equal(calls[0].body.has('apiConfigId'), false);
+  assert.deepEqual(JSON.parse(calls[0].body.get('shots')), [{ ...goodShot(), characterLooks: [{ characterId: 17, lookId: 70, inputRevision: 'a'.repeat(64), imageId: 700 }] }]);
+});
+
+test('unchecking actor disables and omits its look without erasing local choice; recheck restores it, missing-image selection uses null', async () => {
+  let submitted; const p = page(async (url, options) => { submitted = JSON.parse(options.body.get('shots')); return ok({ revision: 2 }); }, { shots: [goodShot()] });
+  const item = p.list.items[0], select = item.looks[0]; p.input(select, select.options[1].value);
+  item.characters[0].checked = false; p.form.fire('change', { target: item.characters[0] });
+  assert.equal(select.disabled, true); assert.equal(item.previews[0].hidden, true); assert.equal(select.value, 'look-0');
+  item.characters[0].checked = true; p.form.fire('change', { target: item.characters[0] }); assert.equal(select.disabled, false); assert.equal(item.previews[0].hidden, false);
+  select.options[1].dataset.imageId = '0'; select.options[1].dataset.imageUrl = ''; p.input(select, select.value);
+  assert.equal(item.previews[0].hidden, true); await p.save(); assert.equal(submitted[0].characterLooks[0].imageId, null);
+  const uncheck = page(async (url, options) => { submitted = JSON.parse(options.body.get('shots')); return ok({ revision: 1 }); }, { shots: [{ ...goodShot(), characterLooks: [{ characterId: 17, lookId: 70, inputRevision: 'a'.repeat(64), imageId: 700 }] }] });
+  uncheck.list.items[0].characters[0].checked = false; uncheck.form.fire('change', { target: uncheck.list.items[0].characters[0] }); await uncheck.save();
+  assert.deepEqual(submitted[0].characterIds, [18]); assert.deepEqual(submitted[0].characterLooks, []);
+});
+
+test('look save failure keeps snapshots/dirty and no retry; invalid metadata stops save and unsafe preview URL is never navigable', async () => {
+  let calls = 0; const p = page(async () => { calls++; return failed({ error: '定妆版本已变化' }); }, { shots: [goodShot()] });
+  const select = p.list.items[0].looks[0]; p.input(select, select.options[1].value); await p.save();
+  assert.equal(calls, 1); assert.equal(select.value, 'look-0'); assert.equal(p.form.dataset.dirty, 'true'); assert.equal(p.main.inert, false); assert.equal(p.reloads.length, 0);
+  select.options[1].dataset.imageId = 'not-an-id'; await p.save(); assert.equal(calls, 1); assert.match(p.nodes.error.textContent, /定妆版本无效/);
+  for (const url of ['javascript:alert(1)', '/projects/2/looks/70/images/700', 'https://other.invalid/image.png']) {
+    select.options[1].dataset.imageUrl = url; p.input(select, select.value); assert.equal(p.list.items[0].previews[0].hidden, true); assert.equal(p.list.items[0].previews[0].attributes.href, '');
+  }
+});
+
+test('regeneration warns it replaces costume choices; failure does not migrate or discard them', async () => {
+  const selected = { characterId: 17, lookId: 70, inputRevision: 'b'.repeat(64), imageId: 700 };
+  let body; const p = page(async (url, options) => { body = options.body; return failed({ error: '生成未成功' }); }, { shots: [{ ...goodShot(), characterLooks: [selected] }] });
+  await p.generate(); assert.match(p.confirmations[0], /镜头、定妆选择.*不会自动迁移定妆选择/); assert.equal(body.has('shots'), false);
+  assert.equal(p.list.items[0].looks[0].selectedOptions[0].dataset.inputRevision, selected.inputRevision); assert.equal(p.reloads.length, 0);
 });
 
 test('generation replacement confirmation includes saved, dirty and deleted-all shots; cancellation has no save or paid request', async () => {
@@ -401,4 +455,33 @@ test('unreviewed drafts and absent script/config/resources have explicit status,
   assert.match(html, /id="storyboard-generate"[^>]*disabled/); assert.match(html, /尚无大语言模型配置/);
   assert.match(html, /还没有已保存的剧本/); assert.match(html, /还没有已确认角色/);
   assert.doesNotMatch(html, /id="storyboard-add"[^>]*disabled/);
+});
+
+test('renderer limits manual looks to the visible actor, escapes names, labels draft/stale and retains selected image version without auto-updating', t => {
+  const { db } = rendererFixture(t);
+  db.exec(`INSERT INTO characters (id, project_id, name) VALUES (17, 1, '<林秋>'), (18, 1, '不可选演员');
+    INSERT INTO character_references (character_id, image, mime, width, height) VALUES (17, x'01', 'image/png', 16, 9);
+    INSERT INTO episode_occurrences (episode_id, kind, character_id, source_name, scene_heading, quote, source_start, mode, script_revision)
+      VALUES (1, 'character', 17, '林秋', '场1 内景 夜', '林秋推门。', 9, 'on_screen', 4);
+    INSERT INTO looks (id, project_id, character_id, name, prompt) VALUES (1, 1, 17, '<影院装>', 'PRIVATE_LOOK_PROMPT'), (2, 1, 17, '缺图草稿', ''), (3, 1, 18, 'PRIVATE_OTHER_ACTOR_LOOK', ''), (4, 1, 17, '旧图定妆', '旧衣');`);
+  const inputs = id => lookInputs(db, 1, db.prepare('SELECT * FROM looks WHERE id = ?').get(id));
+  const image = id => Number(db.prepare("INSERT INTO look_images (look_id, image, mime, width, height, valid, revision, model, prompt, inputs_json) VALUES (?, x'01', 'image/png', 16, 9, 1, ?, 'fake-model', 'PRIVATE_IMAGE_PROMPT', '{}')").run(id, inputs(id).revision).lastInsertRowid);
+  const first = image(1); image(4); db.exec("UPDATE looks SET prompt = '新衣' WHERE id = 4");
+  let html = renderStoryboards(db, 1, 1);
+  assert.match(html, /data-storyboard-look data-character-id="17" disabled/); assert.match(html, /&lt;影院装&gt;/);
+  assert.match(html, /缺图草稿.*缺少定妆图/); assert.match(html, /旧图定妆.*旧依据待核对/); assert.doesNotMatch(html, /PRIVATE_|<影院装>|<img/);
+  const choice = storyboardLookChoices(db, 1, [17]).find(choice => choice.id === 1);
+  const binding = { characterId: 17, lookId: choice.id, inputRevision: choice.inputRevision, imageId: choice.imageId };
+  saveEpisodeStoryboards(db, 1, 1, new URLSearchParams({ revision: '0', scriptRevision: '4', resourceRevision: storyboardResources(db, 1, 1).revision, maxShotSeconds: '5', shots: JSON.stringify([{ ...goodShot(), characterIds: [17], sceneId: 20, characterLooks: [binding] }]) }));
+  const stored = db.prepare('SELECT * FROM episode_storyboards WHERE episode_id = 1').get(); const latest = image(1);
+  html = renderStoryboards(db, 1, 1);
+  assert.match(html, new RegExp(`<option value="1:${first}:${binding.inputRevision}"[^>]*selected>已选版本：&lt;影院装&gt;.*图片已准备`));
+  assert.match(html, new RegExp(`<option value="1:${latest}:${binding.inputRevision}"[^>]*>最新版本：&lt;影院装&gt;`));
+  assert.doesNotMatch(html, new RegExp(`<option value="1:${latest}:${binding.inputRevision}"[^>]*selected`));
+  assert.doesNotMatch(html, /data-stale="true"/); assert.deepEqual(db.prepare('SELECT * FROM episode_storyboards WHERE episode_id = 1').get(), stored);
+  db.prepare('UPDATE look_images SET cleared = 1 WHERE id = ?').run(first);
+  html = renderStoryboards(db, 1, 1); assert.match(html, /已选版本：&lt;影院装&gt;.*已失效，请取消或重选/);
+  assert.match(html, new RegExp(`data-image-id="${first}" data-image-url="" selected`));
+  db.exec('DELETE FROM looks WHERE id = 1'); html = renderStoryboards(db, 1, 1);
+  assert.match(html, /已选版本：原定妆 · #1 · 已失效，请取消或重选/); assert.deepEqual(db.prepare('SELECT * FROM episode_storyboards WHERE episode_id = 1').get(), stored);
 });

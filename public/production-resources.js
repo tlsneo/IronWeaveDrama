@@ -158,7 +158,7 @@
       }));
     });
     clear.addEventListener('click', () => {
-      if (!available(clear) || !saved() || !window.confirm('确定清除当前定妆图？图片仍保留在历史中，不会删除基础演员或素材，也不会调用模型。')) return;
+      if (!available(clear) || !saved() || !window.confirm('确定清除当前定妆图？图片仍保留在历史中；已关联分镜的图片选择会失效，需取消或重选。不会删除基础演员或素材，也不会调用模型。')) return;
       return run('clear-image', clear, `${form.dataset.url}/clear-image`, new URLSearchParams({ revision: revision(), imageId: generation.dataset.imageId, confirmed: 'yes' }));
     });
   }

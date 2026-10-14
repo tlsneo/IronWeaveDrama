@@ -6,6 +6,7 @@ import { characterFields } from './characters.js';
 import { readApiConfig } from './settings.js';
 import { callModel, readTextResult, safeModelText } from './model-client.js';
 import { episodeToShotsPrompt } from '../prompts/storyboard/episode-to-shots.js';
+import { validateStoryboardLooks } from './storyboard-looks.js';
 
 function reject(status, message, extra = {}) { throw Object.assign(new Error(message), { status, ...extra }); }
 function text(value, max, required = false) {
@@ -89,7 +90,9 @@ export function saveEpisodeStoryboards(database, projectId, episodeId, form) {
     if (form.getAll('shots').length !== 1 || typeof form.get('shots') !== 'string' || form.get('shots').length > 512000) reject(400, '镜头列表缺失、重复或过大。');
     let shots;
     try { shots = JSON.parse(form.get('shots')); } catch { reject(400, '镜头列表 JSON 无效。'); }
-    shots = validateShots(shots, before.script.script, before.resources, before.maxShotSeconds);
+    const rawShots = shots;
+    shots = validateShots(rawShots, before.script.script, before.resources, before.maxShotSeconds);
+    shots = validateStoryboardLooks(database, projectId, rawShots, shots, before.plan.shots);
     return { ...store(database, episodeId, before, shots, !!shots.length), redirect: `/projects/${projectId}?view=storyboards&episode=${episodeId}` };
   });
 }

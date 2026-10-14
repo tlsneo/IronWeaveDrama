@@ -1,6 +1,7 @@
 import { escapeHtml } from './html.js';
 import { findEpisode, readEpisodeScript } from './episode-scripts.js';
 import { readEpisodeStoryboards, storyboardResources, projectStoryboardSummary, formatStoryboardDuration } from './storyboards.js';
+import { storyboardLookChoices } from './storyboard-looks.js';
 
 const modes = { on_screen: '现实画面', memory: '回忆画面', imagination: '想象画面' };
 const textFields = [
@@ -21,12 +22,33 @@ export function renderStoryboards(db, projectId, episodeId) {
   const script = readEpisodeScript(db, episodeId);
   const plan = readEpisodeStoryboards(db, episodeId);
   const resources = storyboardResources(db, projectId, episodeId);
+  const lookChoices = storyboardLookChoices(db, projectId, resources.characters.map(resource => resource.id));
   const summary = projectStoryboardSummary(db, projectId);
   const configs = db.prepare("SELECT id, name, model, base_url AS baseUrl FROM api_configs WHERE type = 'llm' ORDER BY id").all();
   const base = `/projects/${projectId}/episodes/${episodeId}`;
   const stale = plan.shots.length > 0 && (plan.scriptRevision !== script.revision || plan.resourceRevision !== resources.revision);
   const total = plan.shots.reduce((sum, shot) => sum + Math.round(shot.duration * 10), 0) / 10;
 
+  function lookOption(choice, selected, prefix = '') {
+    const state = { ready: '图片已准备', missing: '缺少定妆图', stale: '旧依据待核对', invalid: '已失效，请取消或重选' }[choice.state];
+    return `<option value="${html(`${choice.id}:${choice.imageId ?? 0}:${choice.inputRevision}`)}" data-look-id="${html(choice.id)}" data-input-revision="${html(choice.inputRevision)}" data-image-id="${html(choice.imageId ?? 0)}" data-image-url="${html(choice.imageUrl)}" ${selected ? 'selected' : ''}>${html(prefix + choice.name)} · #${html(choice.id)} · ${state}</option>`;
+  }
+  function characterChoice(resource, checked, shot) {
+    const choices = lookChoices.filter(choice => choice.characterId === resource.id);
+    const selected = (shot.characterLooks ?? []).find(binding => binding.characterId === resource.id);
+    const current = selected && choices.find(choice => choice.id === selected.lookId);
+    const matches = current && current.inputRevision === selected.inputRevision && current.imageId === selected.imageId;
+    let previous = '';
+    if (selected && !matches) {
+      const image = current && selected.imageId !== null && db.prepare('SELECT id, revision FROM look_images WHERE id = ? AND look_id = ? AND valid = 1 AND cleared = 0').get(selected.imageId, selected.lookId);
+      previous = lookOption({ id: selected.lookId, name: current?.name ?? '原定妆', inputRevision: selected.inputRevision, imageId: selected.imageId,
+        imageUrl: image ? `/projects/${projectId}/looks/${selected.lookId}/images/${selected.imageId}` : '',
+        state: !current || (selected.imageId !== null && !image) ? 'invalid' : selected.imageId === null ? 'missing' : selected.inputRevision === current.inputRevision && image.revision === current.inputRevision ? 'ready' : 'stale' }, true, '已选版本：');
+    }
+    return `<div class="storyboard-character-choice"><label><input type="checkbox" data-storyboard-character value="${resource.id}" ${checked ? 'checked' : ''}>${html(resource.name)}</label>
+      <label class="storyboard-look-choice">定妆<select data-storyboard-look data-character-id="${resource.id}" ${checked ? '' : 'disabled'}><option value="">暂不选择</option>${previous}${choices.map(choice => lookOption(choice, !!matches && choice.id === selected.lookId, previous && choice.id === selected.lookId ? '最新版本：' : '')).join('')}</select></label>
+      <a data-storyboard-look-preview="${resource.id}" target="_blank" rel="noopener" hidden>查看定妆照</a>${!choices.length ? `<small class="field-help">尚无关联定妆，请先在<a href="/projects/${projectId}?resource=looks">定妆库</a>选择此基础演员并保存。</small>` : ''}</div>`;
+  }
   function card(shot = {}, index = 0, template = false) {
     const characters = shot.characterIds ?? [];
     const missingCharacters = characters.filter(id => !resources.characters.some(resource => resource.id === id));
@@ -41,7 +63,7 @@ export function renderStoryboards(db, projectId, episodeId) {
           <div class="storyboard-fields">${textFields.slice(0, 3).map(field => textControl(field, shot)).join('')}
             <div class="form-field"><label>画面类型<select data-storyboard-field="mode" required>${invalidMode ? '<option value="" selected>画面类型无效，请重新选择</option>' : ''}${Object.entries(modes).map(([value, label]) => `<option value="${value}" ${shot.mode === value ? 'selected' : ''}>${label}</option>`).join('')}</select></label></div>
             <div class="form-field"><label>计划时长（秒，0.1 秒步进）<input type="number" data-storyboard-field="duration" min="0.1" max="${plan.maxShotSeconds}" step="0.1" required value="${html(shot.duration)}" aria-describedby="storyboard-duration-error"></label></div>
-            <fieldset class="storyboard-character-choices"><legend>出镜角色（本集已确认资源，可多选）</legend>${resources.characters.map(resource => `<label><input type="checkbox" data-storyboard-character value="${resource.id}" ${characters.includes(resource.id) ? 'checked' : ''}>${html(resource.name)}</label>`).join('') || '<p class="field-help">还没有已确认角色；可继续设计文字分镜。</p>'}${missingCharacters.map(id => `<label class="form-error"><input type="checkbox" data-storyboard-character value="${html(id)}" checked>已失效角色 #${html(id)}，请取消并重新选择</label>`).join('')}</fieldset>
+            <fieldset class="storyboard-character-choices"><legend>出镜角色（本集已确认资源，可多选）</legend>${resources.characters.map(resource => characterChoice(resource, characters.includes(resource.id), shot)).join('') || '<p class="field-help">还没有已确认角色；可继续设计文字分镜。</p>'}${missingCharacters.map(id => `<label class="form-error"><input type="checkbox" data-storyboard-character value="${html(id)}" checked>已失效角色 #${html(id)}，请取消并重新选择</label>`).join('')}</fieldset>
             <div class="form-field"><label>关联场景<select data-storyboard-field="sceneId"><option value="">不关联场景</option>${resources.scenes.map(resource => `<option value="${resource.id}" ${shot.sceneId === resource.id ? 'selected' : ''}>${html(resource.name)}</option>`).join('')}${missingScene ? `<option value="${html(shot.sceneId)}" selected>已失效场景 #${html(shot.sceneId)}，请重新选择</option>` : ''}</select></label></div>
             ${textFields.slice(3).map(field => textControl(field, shot)).join('')}
           </div>
@@ -70,6 +92,7 @@ export function renderStoryboards(db, projectId, episodeId) {
       <div id="storyboard-shots" class="storyboard-shots">${plan.shots.map((shot, index) => card(shot, index)).join('')}</div>
       <p id="storyboard-empty" class="field-help" ${plan.shots.length ? 'hidden' : ''}>还没有镜头。生成草稿，或添加空白镜头开始设计。</p>
       <div class="storyboard-footer"><button id="storyboard-add" class="theme-toggle" type="button">＋ 添加镜头</button><button id="storyboard-save" class="create-button" type="submit" ${stale ? 'disabled' : ''}>确认并保存分镜</button></div>
+      <p class="field-help">出镜角色可手动选择同一基础演员的定妆，不自动搭配或用基础图代替。缺图／旧依据可先保存文字关联，但不代表可直接出图；已选图片版本不会自动更新，道具是否持有仍由镜头动作决定。</p>
       <p class="field-help">保存表示已逐镜核对原文、资源和时长；生成草稿不自动视为确认。镜头按剧本场次排列，同一场标题连续展示。最多 300 镜头。</p>
     </form>
     <template id="storyboard-shot-template">${card({}, 0, true)}</template>
