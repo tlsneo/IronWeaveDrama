@@ -4,6 +4,19 @@ import { baseCharacterBoard } from '../prompts/character/base-board.js';
 import { referenceCharacterBoard } from '../prompts/character/reference-board.js';
 import { novelToScriptPrompt } from '../prompts/script/novel-to-script.js';
 import { episodeToShotsPrompt } from '../prompts/storyboard/episode-to-shots.js';
+import { manualLookPrompt } from '../prompts/look/manual-look.js';
+
+test('定妆复用基础四视图格式但不复制内衣：保持演员身份、各视图换装一致，原样附加用户提示词', () => {
+  const user = '  穿外套，纸袋放右侧；不改演员外观。\n';
+  const prompt = manualLookPrompt({ character: { id: 1, name: 'Actor' }, assets: [{ id: 2, kind: 'costumes', name: 'Coat' }, { id: 3, kind: 'props', name: 'Bag' }], style: 'Ink', aspectRatio: '16:9', prompt: user });
+  assert.doesNotMatch(prompt.split('USER PROMPT (verbatim):\n')[0], /[^\x00-\x7f]/);
+  assert.ok(prompt.endsWith(user));
+  for (const rule of ['ONE horizontal 16:9', 'solid pure-white', 'four visual sections in ONE horizontal row', '34%, 22%, 22%, 22%', 'no second row or 2x2 grid', 'facial identity, apparent age, hairstyle and natural body proportions', 'Do not copy neutral base underwear', 'consistently across views', "user's instructions about wearing or holding", "Do not force every prop into the actor's hands", 'Do not replace the actor', 'fixed four-view layout', 'Do not redesign or beautify']) assert.ok(prompt.includes(rule), rule);
+  assert.match(prompt, /FRONTAL FACE CLOSE-UP[\s\S]*FRONT FULL-BODY VIEW[\s\S]*LEFT-FACING SIDE FULL-BODY VIEW[\s\S]*BACK FULL-BODY VIEW/);
+  const references = JSON.parse(prompt.split('\n').find(line => line.startsWith('REFERENCE IMAGE ORDER (data): ')).split(': ').slice(1).join(': '));
+  assert.deepEqual(references.map(reference => [reference.image, reference.role, reference.id]), [[1, 'actor identity', 1], [2, 'clothing or accessory', 2], [3, 'prop', 3]]);
+  assert.doesNotMatch(prompt, /do not impose a four-view sheet|Use only plain, opaque/);
+});
 
 test('采用 C 试写的戏剧化重构方法，允许新设计行动与互动，不逐段转录或逐项拍准备清单', () => {
   for (const rule of ['substantial dramatic reconstruction', 'not paragraph-by-paragraph transcription', 'central characters, relationships, motivations, main conflict, and emotional trajectory', 'merge, omit, or reorder events', 'design new actions and interactions', 'rewrite or add dialogue', 'small scenes compatible with the original story', 'actable drama', 'rather than assigning an action to every sentence', 'Do not film a preparation checklist item by item', 'explain everything through internal monologue', 'changes merely for the sake of changing things', 'Explain significant cuts, additions, and restructuring in notes']) assert.ok(novelToScriptPrompt.includes(rule), rule);

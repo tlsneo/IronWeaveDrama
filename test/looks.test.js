@@ -103,6 +103,32 @@ test('定妆单次真实multipart多图字段按演员/服饰/道具顺序，原
   assert.equal(readLookImage(f.db,id),null); assert.equal((await fetch(`${f.url}/projects/1/looks/${id}/images/${image.id}`)).status,200);
 });
 
+test('定妆固定基础演员四视图16:9，不跟随成片比例；旧格式照片保留为旧依据，不自动重新调用模型', async t => {
+  const f=await fixture(t), id=await f.ready(), look=f.current(id);
+  f.db.exec("UPDATE projects SET aspect_ratio='9:16' WHERE id=1");
+  const inputs=lookInputs(f.db,1,look); assert.equal(inputs.aspectRatio,'16:9'); assert.equal(inputs.format,'four-view');
+  const old={...inputs}; delete old.format; delete old.missing; delete old.revision; old.aspectRatio='9:16';
+  f.db.prepare("INSERT INTO look_images(look_id,image,mime,width,height,valid,revision,model,prompt,inputs_json)VALUES(? ,?,'image/png',9,16,1,'old-free-form-hash','fake-model','old-user-prompt',?)").run(id,png(9,16),JSON.stringify(old));
+  const page=await fetch(`${f.url}/projects/1?resource=looks&look=${id}`); assert.equal(page.status,200);
+  assert.match(await page.text(),/当前图使用旧依据/); assert.equal(f.calls.length,0);
+  assert.equal((await f.generate(id)).status,200); assert.equal(f.calls[0].size,'2560x1440');
+  assert.match(f.calls[0].prompt,/FRONTAL FACE CLOSE-UP[\s\S]*FRONT FULL-BODY VIEW[\s\S]*LEFT-FACING SIDE FULL-BODY VIEW[\s\S]*BACK FULL-BODY VIEW/);
+  assert.equal(f.db.prepare('SELECT count(*) AS n FROM look_images').get().n,2);
+  assert.equal((await fetch(`${f.url}/projects/1/looks/${id}/images/1`)).status,200);
+});
+
+test('定妆修图沿用演员503合同：核实归属，不发模型、不改图片、无整图回退', async t => {
+  const f=await fixture(t), id=await f.ready(); assert.equal((await f.generate(id)).status,200);
+  const before=f.db.prepare('SELECT * FROM look_images').all(), look=f.current(id);
+  const response=await f.post(`/projects/1/looks/${id}/edit-image`,{instruction:'只改衣领',apiConfigId:'1'}); assert.equal(response.status,503);
+  assert.equal((await response.json()).error,'遮罩修图接口尚未接入，不会调用模型或回退为整图编辑。');
+  assert.equal((await f.post(`/projects/2/looks/${id}/edit-image`,{})).status,404);
+  assert.equal((await f.post('/projects/1/looks/999/edit-image',{})).status,404);
+  assert.equal((await f.post('/projects/1/costumes/1/edit-image',{})).status,404);
+  assert.equal((await f.post(`/projects/1/looks/${id}/edit-image`,{},{headers:{Origin:'https://other.invalid'}})).status,403);
+  assert.deepEqual(f.db.prepare('SELECT * FROM look_images').all(),before); assert.deepEqual(f.current(id),look); assert.equal(f.calls.length,1);
+});
+
 test('只有演员也固定使用image[]；优先有效基础图，较新的无效图不被当成身份参考', async t => {
   const f=await fixture(t), id=await f.ready(), look=f.current(id);
   assert.equal((await f.post(`/projects/1/looks/${id}`,{revision:String(look.revision),name:look.name,characterId:'1',prompt:look.prompt,assetIds:'[]'})).status,200);

@@ -1,10 +1,11 @@
 import { imagePoint, paintSegment, replayMask, maskPixels } from './image-mask.js';
 
-const dialog = document.getElementById('character-image-edit-dialog') ?? document.getElementById('scene-image-edit-dialog');
+const dialog = document.getElementById('character-image-edit-dialog') ?? document.getElementById('scene-image-edit-dialog') ?? document.getElementById('look-image-edit-dialog');
 if (dialog) {
   const kind = dialog.dataset?.kind ?? 'character';
   const button = document.getElementById(`edit-${kind}-image`);
   const source = document.getElementById(`${kind}-board-image`);
+  const form = document.getElementById(kind === 'look' ? 'production-form' : `${kind}-form`);
   const stage = document.getElementById('image-edit-stage');
   const image = document.getElementById('image-edit-source');
   const overlay = document.getElementById('image-edit-overlay');
@@ -87,7 +88,7 @@ if (dialog) {
   }
 
   button.addEventListener('click', () => {
-    if (button.disabled || document.getElementById(`${kind}-form`).inert || !source.getAttribute('src')) return;
+    if (button.disabled || form.inert || !source?.getAttribute('src')) return;
     errorElement.textContent = '';
     if (!dialog.open) dialog.showModal();
     if (sourceUrl === source.src && ready) { updateView(); return; }
@@ -199,7 +200,7 @@ if (dialog) {
       });
       url = URL.createObjectURL(blob);
       const link = document.createElement('a');
-      link.href = url; link.download = 'character-mask.png'; link.click();
+      link.href = url; link.download = `${kind}-mask.png`; link.click();
     } catch (error) { errorElement.textContent = error.message; }
     finally {
       clearTimeout(timer);

@@ -16,6 +16,7 @@ after(() => rm(directory, { recursive: true, force: true }));
 await Promise.all([
   writeFile(join(directory, 'package.json'), '{"type":"module"}'),
   writeFile(join(directory, 'render-production-resources.js'), renderer),
+  writeFile(join(directory, 'render-image-dialog.js'), await readFile(new URL('../src/render-image-dialog.js', import.meta.url), 'utf8')),
   writeFile(join(directory, 'html.js'), await readFile(new URL('../src/html.js', import.meta.url), 'utf8')),
   writeFile(join(directory, 'production-assets.js'), `
     export function findProductionAsset(db, project, kind, id) {
@@ -62,7 +63,7 @@ function database(t) {
     INSERT INTO looks VALUES (1, 7, 11, '定妆', '提示词', 5), (2, 8, 13, '外项目定妆', '', 1), (3, 7, NULL, '草稿', '', 1);
     INSERT INTO look_assets VALUES (1, 1), (1, 2);
     INSERT INTO look_images VALUES (501, 1, X'0102', 'image/png', 600, 700, 1, 0, 'old-input', 'model', 'prompt', '{}', 'now'), (502, 1, X'0102', 'image/png', 600, 700, 0, 0, 'input-current', 'failed-model', 'prompt', '{}', 'now'), (503, 1, X'0102', 'image/png', 600, 700, 1, 1, 'old-input', 'model', 'prompt', '{}', 'now'), (504, 2, X'0102', 'image/png', 600, 700, 1, 0, 'other', 'model', 'prompt', '{}', 'now');
-    INSERT INTO api_configs VALUES (21, '图生图', 'image_to_image', 'model', 'https://example.invalid/v1', 'NEVER_EXPOSE_API_KEY'), (22, '文生图不应出现', 'text_to_image', 'other', 'https://other.invalid', 'OTHER_KEY'), (23, 'LLM不应出现', 'llm', 'llm', 'https://llm.invalid', 'LLM_KEY');
+    INSERT INTO api_configs VALUES (21, '图生图', 'image_to_image', 'model', 'https://example.invalid/v1', 'NEVER_EXPOSE_API_KEY'), (22, '文生图不应出现', 'text_to_image', 'other', 'https://other.invalid', 'OTHER_KEY'), (23, 'LLM不应出现', 'llm', 'llm', 'https://llm.invalid', 'LLM_KEY'), (24, '编辑图片', 'image_edit', 'masked-model', 'https://edit.invalid', 'MASK_SECRET_KEY');
   `);
   sqlite.prepare('UPDATE characters SET name = ? WHERE id IN (11, 12)').run(dangerous);
   sqlite.prepare('UPDATE production_assets SET name = ?, description = ? WHERE id = 1').run(dangerous, '</textarea><script>bad()</script>');
@@ -73,7 +74,7 @@ function database(t) {
     testInputs: {
       revision: 'input-current', character: { id: 11, name: dangerous, image: { id: 99, type: 'reference', url: '/projects/7/characters/11/references/99', mime: 'image/png', width: 20, height: 30, bytes: Buffer.from('NEVER_EXPOSE_BYTES') } },
       assets: [1, 2].map(id => ({ id, kind: id === 1 ? 'costumes' : 'props', name: '素材', description: '', image: { id: 100 + id, bytes: Buffer.from('NEVER_EXPOSE_BYTES') } })),
-      missing: [], style: '<风格 & "手绘">', aspectRatio: '3:4',
+      missing: [], style: '<风格 & "手绘">', aspectRatio: '16:9', format: 'four-view',
     },
   };
   return { db, sqlite, queries };
@@ -99,7 +100,7 @@ test('SSR 素材详情：使用正确路径、revision、显式上传；名称/�
   assert.doesNotMatch(props, /images\/102/);
 });
 
-test('SSR 定妆：项目内选择、同名带 ID、可存空演员、多件素材、仅图生图元数据及旧依据历史', t => {
+test('SSR 定妆：项目内选择、同名带 ID、可存空演员、多件素材、图生图／编辑配置隔离及旧依据历史', t => {
   const { db, sqlite, queries } = database(t);
   sqlite.prepare('UPDATE api_configs SET name = ?, model = ?, base_url = ? WHERE id = 21').run(dangerous, 'model"<&', 'https://example.invalid/?a="&b=1');
   const result = renderLooks(db, 7, query('look=1'));
@@ -120,7 +121,7 @@ test('SSR 定妆：项目内选择、同名带 ID、可存空演员、多件素�
   assert.match(result.content, /参考图 3 · 道具/);
   assert.match(result.content, /look-reference-order[\s\S]*\/projects\/7\/characters\/11\/references\/99/);
   assert.match(result.content, /data-model="model&quot;&lt;&amp;" data-base-url="https:\/\/example.invalid\/\?a=&quot;&amp;b=1"/);
-  assert.doesNotMatch(result.content, /NEVER_EXPOSE|API_KEY|OTHER_KEY|LLM_KEY|文生图不应出现|LLM不应出现|<script>/);
+  assert.doesNotMatch(result.content, /NEVER_EXPOSE|API_KEY|OTHER_KEY|LLM_KEY|MASK_SECRET_KEY|文生图不应出现|LLM不应出现|<script>/);
   assert.ok(queries.every(sql => !/\b(api_key|image|bytes)\b/i.test(sql)));
   assert.match(result.content, /当前图使用旧依据，待核对/);
   assert.match(result.content, /\/projects\/7\/looks\/1\/images\/501/);
@@ -131,6 +132,13 @@ test('SSR 定妆：项目内选择、同名带 ID、可存空演员、多件素�
   assert.match(result.content, /&lt;\/textarea&gt;&lt;script&gt;/);
   assert.doesNotMatch(result.content, /id="look-generate"[^>]*disabled/);
   assert.match(css, /production-preview-image[^}]*aspect-ratio: auto/);
+  assert.match(result.content, /固定横向16:9/);
+  assert.match(result.content, /id="look-board-image"[^>]*src="\/projects\/7\/looks\/1\/images\/501"/);
+  assert.match(result.content, /id="edit-look-image"[^>]*>AI修图/);
+  assert.match(result.content, /id="look-image-edit-dialog"[^>]*data-kind="look"/);
+  assert.match(result.content, /id="look-edit-api"[\s\S]*value="24">编辑图片 · masked-model/);
+  assert.match(result.content, /id="submit-look-edit"[^>]*disabled/);
+  assert.match(result.content, /遮罩接口待接入，当前不会调用模型/);
 });
 
 test('SSR 缺演员/素材图片禁用生成，但可保存草稿；当前依据相符时不标旧图，历史只列最近 20 张', t => {
@@ -142,6 +150,8 @@ test('SSR 缺演员/素材图片禁用生成，但可保存草稿；当前依据
   assert.match(draft, /id="look-generate"[^>]*disabled/);
   assert.match(draft, /<button class="create-button" type="submit">保存资料/);
   assert.match(draft, /id="look-clear-image"[^>]*disabled/);
+  assert.match(draft, /id="edit-look-image"[^>]*disabled/);
+  assert.doesNotMatch(draft, /id="look-board-image"/);
   db.testInputs.missing = [];
   sqlite.prepare('UPDATE look_images SET revision = ? WHERE id = 501').run('input-current');
   const same = renderLooks(db, 7, query('look=1')).content;

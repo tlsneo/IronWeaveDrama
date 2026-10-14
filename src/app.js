@@ -115,7 +115,7 @@ export function createApp(database) {
     const generationRoute = path.match(/^\/projects\/([1-9]\d*)\/(characters|scenes)\/([1-9]\d*)\/(generate|edit-image|clear-image)$/);
     const referenceRoute = path.match(/^\/projects\/([1-9]\d*)\/(characters|scenes)\/([1-9]\d*)\/(reference-image|clear-reference)$/);
     const boardRoute = path.match(/^\/projects\/([1-9]\d*)\/(characters|scenes)\/([1-9]\d*)\/(boards|images|references)\/([1-9]\d*)$/);
-    const productionRoute = path.match(/^\/projects\/([1-9]\d*)\/(props|costumes|looks)(?:\/([1-9]\d*)(?:\/(reference-image|clear-reference|generate|clear-image))?)?$/);
+    const productionRoute = path.match(/^\/projects\/([1-9]\d*)\/(props|costumes|looks)(?:\/([1-9]\d*)(?:\/(reference-image|clear-reference|generate|clear-image|edit-image))?)?$/);
     const productionImageRoute = path.match(/^\/projects\/([1-9]\d*)\/(props|costumes|looks)\/([1-9]\d*)\/images\/([1-9]\d*)$/);
     const settingsRoute = path.match(/^\/settings\/api(?:\/([1-9]\d*)(\/check)?)?$/);
 
@@ -131,8 +131,12 @@ export function createApp(database) {
       if (productionRoute && request.method === 'POST') {
         const projectId = Number(productionRoute[1]), kind = productionRoute[2], id = productionRoute[3] ? Number(productionRoute[3]) : null, action = productionRoute[4];
         if (![projectId, ...(id ? [id] : [])].every(Number.isSafeInteger)) { json(404, { error: '素材或定妆不存在' }); return; }
-        if ((kind === 'looks' && ['reference-image', 'clear-reference'].includes(action)) || (kind !== 'looks' && ['generate', 'clear-image'].includes(action))) { json(404, { error: '此资源不支持该操作' }); return; }
+        if ((kind === 'looks' && ['reference-image', 'clear-reference'].includes(action)) || (kind !== 'looks' && ['generate', 'clear-image', 'edit-image'].includes(action))) { json(404, { error: '此资源不支持该操作' }); return; }
         const form = await readForm(request, action ? 32768 : kind === 'looks' ? 256 * 1024 : 65536, action === 'reference-image');
+        if (action === 'edit-image') {
+          findLook(database, projectId, id);
+          json(503, { error: '遮罩修图接口尚未接入，不会调用模型或回退为整图编辑。' }); return;
+        }
         const result = !action ? kind === 'looks' ? saveLook(database, projectId, id, form) : saveProductionAsset(database, projectId, kind, id, form)
           : action === 'reference-image' ? await saveAssetReference(database, projectId, kind, id, form)
             : action === 'clear-reference' ? clearAssetReference(database, projectId, kind, id, form)

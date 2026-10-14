@@ -43,7 +43,7 @@ export function lookInputs(database, projectId, look) {
     return { id: asset.id, kind: asset.kind, name: asset.name, description: asset.description, image };
   });
   if ((character?.image?.bytes ?? 0) + assets.reduce((sum, asset) => sum + (asset.image?.bytes ?? 0), 0) > 32 * 1024 * 1024) missing.push('所选参考图合计超过 32 MiB，请缩小素材图或减少选择。');
-  const source = { lookId: look.id, name: look.name, prompt: look.prompt, character, assets, style: project.style, aspectRatio: project.aspect_ratio };
+  const source = { lookId: look.id, name: look.name, prompt: look.prompt, character, assets, style: project.style, format: 'four-view', aspectRatio: '16:9' };
   return { ...source, missing, revision: createHash('sha256').update(JSON.stringify(source)).digest('hex') };
 }
 export function saveLook(database, projectId, id, form) {
@@ -130,7 +130,7 @@ export async function generateLookImage(database, projectId, id, form) {
     }
     const imageUrl = `/projects/${projectId}/looks/${id}/images/${imageId}`;
     if (!valid) reject(unchanged ? 502 : 409, unchanged
-      ? `接口返回 ${details.width} × ${details.height}，不符合项目 ${inputs.aspectRatio}；本次图片保留供查看，未替换原定妆照，没有自动重试。`
+      ? `接口返回 ${details.width} × ${details.height}，不符合定妆四视图 ${inputs.aspectRatio}；本次图片保留供查看，未替换原定妆照，没有自动重试。`
       : '生成期间演员、素材或风格已变化，本次图片保留供查看，未替换原定妆照，没有自动重试。', { recoveryImage: imageUrl });
     return { id: imageId, revision, imageUrl, message: '定妆照已生成保存，请核对人物身份、服饰与道具。', redirect: `/projects/${projectId}?resource=looks&look=${id}` };
   });

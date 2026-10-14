@@ -26,12 +26,13 @@ function page(kind = 'character') {
   nodes['character-board-image'].src = '/boards/1';
   Object.assign(nodes['image-edit-source'], { naturalWidth: 8, naturalHeight: 4 });
   nodes['image-edit-brush'].value = '100';
-  if (kind === 'scene') nodes['character-image-edit-dialog'].dataset.kind = 'scene';
+  nodes['character-image-edit-dialog'].dataset.kind = kind;
+  if (kind === 'look') nodes['character-board-image'].src = '/projects/7/looks/1/images/501';
   runInNewContext(script, {
     imagePoint, paintSegment, replayMask, maskPixels, Uint8Array,
     ImageData: class { constructor(data) { this.data = data; } },
     document: {
-      getElementById: id => kind === 'scene' ? id.includes('character') ? undefined : nodes[id.replace('scene', 'character')] : nodes[id],
+      getElementById: id => kind === 'character' ? nodes[id] : id.includes('character') ? undefined : nodes[id === 'production-form' ? 'character-form' : id.replace(kind, 'character')],
       createElement(tag) {
         if (tag === 'a') return { click() { downloads.push(this); } };
         const canvas = node(); canvas.toBlob = callback => { downloads.push(canvas); callback({}); }; return canvas;
@@ -47,6 +48,22 @@ function page(kind = 'character') {
   };
   return { nodes, tools, downloads, stroke, open: () => nodes['edit-character-image'].click(), load: () => nodes['image-edit-source'].fire('load') };
 }
+
+test('定妆复用同一遮罩编辑器：读取定妆原图、绘制／擦除／撤销／导出且不调用模型，忙碌及无图不可打开', async () => {
+  const p = page('look'), n = p.nodes;
+  n['character-form'].inert = true; await p.open(); assert.equal(n['character-image-edit-dialog'].open, undefined);
+  n['character-form'].inert = false; n['edit-character-image'].disabled = true; await p.open(); assert.equal(n['character-image-edit-dialog'].open, undefined);
+  n['edit-character-image'].disabled = false;
+  await p.open(); await p.load(); await p.stroke();
+  assert.equal(n['image-edit-source'].src, '/projects/7/looks/1/images/501');
+  await n['image-edit-export'].click(); assert.equal(p.downloads[1].download, 'look-mask.png');
+  await p.tools[1].click(); await p.stroke(); assert.equal(n['image-edit-export'].disabled, true);
+  await n['image-edit-undo'].click(); assert.equal(n['image-edit-export'].disabled, false);
+  n['character-edit-instruction'].value = '只改衣领'; await n['image-edit-close'].click(); await p.open();
+  assert.equal(n['character-edit-instruction'].value, '只改衣领'); assert.equal(n['image-edit-export'].disabled, false);
+  assert.equal(n['character-board-image'].src, '/projects/7/looks/1/images/501');
+  await n['image-edit-close'].click(); n['character-board-image'].src = ''; await p.open(); assert.equal(n['character-image-edit-dialog'].open, false);
+});
 
 test('场景图复用离线遮罩编辑器，正确打开场景原图并可绘制／撤销／导出，不发起网络调用', async () => {
   const p = page('scene'); await p.open(); await p.load(); await p.stroke();
