@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { DatabaseSync } from 'node:sqlite';
@@ -47,6 +47,14 @@ test('本集页面提供小说、剧本、改编说明和 LLM 选择，缺少配
   const f = await fixture(t);
   const html = await (await fetch(f.url + '/projects/1?view=episode&episode=1')).text();
   for (const label of ['小说原文', '剧本正文', '改编说明', '大语言模型 API', '生成剧本', '保存剧本']) assert.ok(html.includes(label));
+  const comparison = html.match(/<div class="episode-script-comparison">([\s\S]*?)\n\s*<\/div>\n\s*<details/)[1];
+  assert.match(comparison, /id="episode-script-source"[^>]*rows="24"[\s\S]*id="episode-script-text"[^>]*rows="24"/);
+  assert.equal((comparison.match(/<textarea/g) ?? []).length, 2);
+  assert.ok(html.indexOf('episode-script-toolbar') < html.indexOf('episode-script-comparison'));
+  const css = await readFile(new URL('../public/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\.episode-script-comparison\s*\{[^}]*grid-template-columns: repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(css, /\.episode-script-comparison textarea\s*\{[^}]*height: clamp\(24rem, 65vh, 56rem\)/);
+  assert.match(css, /@media \(max-width: 1000px\)\s*\{[^}]*\}[\s\S]*?\.episode-script-comparison\s*\{\s*grid-template-columns: minmax\(0, 1fr\)/);
   assert.match(html, /编剧 · script-model/);
   assert.doesNotMatch(html, /script-test-secret|image-secret|画图 · image-model|目标时长|景别设置/);
   assert.equal((await fetch(f.url + '/episode-script.js')).status, 200);

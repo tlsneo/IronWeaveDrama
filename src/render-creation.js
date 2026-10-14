@@ -100,7 +100,6 @@ export function renderCreation(database, projectId, view, query) {
       <section class="creation-panel episode-script-panel" aria-labelledby="episode-script-title">
         <h3 id="episode-script-title">本集剧本</h3>
         <form id="episode-script-form" data-url="${base}/episodes/${id}/script" data-generate-url="${base}/episodes/${id}/generate-script" data-revision="${draft.revision}">
-          <div class="form-field"><label for="episode-script-source">小说原文</label><textarea id="episode-script-source" name="source" maxlength="30000" rows="10">${escapeHtml(draft.source)}</textarea></div>
           <div class="episode-script-toolbar">
             <div class="form-field"><label for="episode-script-api">大语言模型 API</label><select id="episode-script-api">${configs.length !== 1 ? '<option value="">选择大语言模型配置</option>' : ''}${configs.map(config => `<option value="${config.id}" data-model="${escapeHtml(config.model)}" data-base-url="${escapeHtml(config.baseUrl)}">${escapeHtml(config.name)} · ${escapeHtml(config.model)}</option>`).join('')}</select></div>
             <button id="generate-episode-script" class="create-button" type="button" ${configs.length ? '' : 'disabled'}>生成剧本</button>
@@ -109,7 +108,10 @@ export function renderCreation(database, projectId, view, query) {
           ${!configs.length ? '<p class="field-help">尚无大语言模型配置，请先到<a href="/settings?type=llm">设置</a>添加。</p>' : ''}
           <p id="episode-script-error" class="form-error" role="alert"></p>
           <p id="episode-script-status" class="field-help" role="status" aria-live="polite"></p>
-          <div class="form-field"><label for="episode-script-text">剧本正文</label><textarea id="episode-script-text" name="script" maxlength="60000" rows="20">${escapeHtml(draft.script)}</textarea></div>
+          <div class="episode-script-comparison">
+            <div class="form-field"><label for="episode-script-source">小说原文</label><textarea id="episode-script-source" name="source" maxlength="30000" rows="24">${escapeHtml(draft.source)}</textarea></div>
+            <div class="form-field"><label for="episode-script-text">剧本正文</label><textarea id="episode-script-text" name="script" maxlength="60000" rows="24">${escapeHtml(draft.script)}</textarea></div>
+          </div>
           <details class="episode-script-notes" ${draft.notes ? 'open' : ''}><summary>改编说明</summary><div class="form-field"><label class="visually-hidden" for="episode-script-notes">删并说明与原文疑点</label><textarea id="episode-script-notes" name="notes" maxlength="10000" rows="5">${escapeHtml(draft.notes)}</textarea></div></details>
         </form>
         <section id="episode-script-recovery" class="episode-script-recovery" hidden aria-label="未保存的模型返回内容"><h4>返回内容未保存，请先复制保留</h4><textarea id="episode-script-recovery-text" rows="10" readonly aria-label="可手动取回的模型文本"></textarea></section>
