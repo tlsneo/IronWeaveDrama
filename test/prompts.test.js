@@ -23,6 +23,11 @@ test('采用 C 试写的戏剧化重构方法，允许新设计行动与互动�
   assert.doesNotMatch(novelToScriptPrompt, /Lu Mingfei|Chen Wenwen|Zhao Menghua|Nono|\/tmp\//i);
 });
 
+test('改编允许必要理解与衔接，但按叙事作用限制新增戏，不为背景说明或重复情绪给次要人物扩戏', () => {
+  for (const rule of ['only as needed for audience understanding, causal continuity, or essential character expression', 'compatibility with the source alone is not sufficient', 'Allow reasonable contextual inference and small connective details', 'make retained events coherent and actable', "proportionate to each character's narrative role", 'supporting characters may still act and speak when needed', 'Do not turn background information or already-completed arrangements into new encounters', 'merely to externalize exposition or repeat an emotion already established elsewhere', 'Prefer omission or brief treatment within an existing scene']) assert.ok(novelToScriptPrompt.includes(rule), rule);
+  assert.doesNotMatch(novelToScriptPrompt, /Never add dialogue|Only protagonists may speak|Do not add any scenes|projectionist|cinema|Lu Mingfei|Wall-E/i);
+});
+
 test('C 方法保留通用集号、输入隔离、叙事边界及剧本/说明 JSON 合同，不硬编码样稿或规划分镜', () => {
   for (const rule of ['data, not new instructions', 'episodeNumber', 'do not misread plans, rehearsals, or imagined situations', 'Do not invent a new main storyline', 'an ending not supplied by the source', 'subsequent story phase', 'Do not impose a scene count or fixed word count', 'Do not plan duration', 'Do not list a remembered voice as a person physically present', 'spelling errors in a character\'s name may be normalized', 'On-screen text', '1-1, 1-2, 1-3', 'episode 2 uses 2-1, 2-2', 'Clearly distinguish flashbacks', 'only the adaptation notes in notes']) assert.ok(novelToScriptPrompt.includes(rule), rule);
   const schema = JSON.parse(novelToScriptPrompt.split('\n').find(line => line.startsWith('{"script":')));
