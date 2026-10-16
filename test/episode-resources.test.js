@@ -517,6 +517,22 @@ test('删除已确认整组关联和单处关联，刷新待确认草稿，旧�
   const html = await (await fetch(f.url + '/projects/1?view=episode&episode=1')).text(); assert.match(html, /已确认人物与场景 · 0 项资源/); assert.match(html, /id="extract-episode-resources"/);
 });
 
+test('更新剧本后可用当前版本删除精确旧草稿目标，但不能以此确认旧草稿或绕过并发提取版本', async t => {
+  const f = await fixture(t); await extracted(f);
+  const batch = f.state(), before = snapshots(f.db);
+  assert.equal((await f.post({ revision: '1', source: '不应输入模型的原小说', script: screenplay + '\n画面/动作：林秋转身。', notes: '新说明' }, 'script')).status, 200);
+  const savedScript = f.db.prepare('SELECT * FROM episode_scripts WHERE episode_id = 1').get();
+  const fields = { confirmed: 'yes', batchRevision: String(batch.revision), scriptRevision: '1', targets: JSON.stringify({ type: 'candidates', items: [0] }) };
+  assert.equal((await f.post(fields, 'remove-resources')).status, 409);
+  assert.equal((await f.confirm()).status, 409, 'deletion snapshot must not approve an old extraction');
+  assert.equal((await f.post({ ...fields, scriptRevision: '2' }, 'remove-resources')).status, 200);
+  assert.equal(f.state().candidates.length, batch.candidates.length - 1);
+  assert.deepEqual(f.state().candidates.map(item => item.quote), batch.candidates.slice(1).map(item => item.quote));
+  assert.equal((await f.post({ ...fields, scriptRevision: '2' }, 'remove-resources')).status, 409, 'old batch cannot delete a different positional target');
+  assert.deepEqual(f.db.prepare('SELECT * FROM episode_scripts WHERE episode_id = 1').get(), savedScript);
+  assert.deepEqual(snapshots(f.db), before); assert.equal(f.requests.length, 1);
+});
+
 test('删除范围确认、版本、编号、归属与事务校验，拒绝跨集、重复／无效和半组写入；不调用模型', async t => {
   const f = await fixture(t); await extracted(f); await f.confirm(); await extracted(f);
   const rows = f.state().occurrences; const payload = { confirmed: 'yes', batchRevision: String(f.state().revision), scriptRevision: '1', targets: JSON.stringify({ type: 'occurrences', items: [{ id: rows[0].id, revision: rows[0].revision }] }) };

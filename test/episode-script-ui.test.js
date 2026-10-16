@@ -16,7 +16,7 @@ function page(fetch, confirmed = true) {
   nodes['generate-episode-script'].textContent = '生成剧本'; nodes['save-episode-script'].textContent = '保存剧本';
   nodes['episode-script-recovery'].hidden = true;
   runInNewContext(script, {
-    document: { getElementById: id => nodes[id], querySelector: () => main },
+    document: { getElementById: id => nodes[id], querySelector: () => main, querySelectorAll: () => [] },
     window: { confirm() { confirmations++; return confirmed; }, addEventListener(event, handler) { events[event] = handler; } },
     URLSearchParams, TypeError, Error, fetch,
   });

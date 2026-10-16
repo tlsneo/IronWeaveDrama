@@ -81,11 +81,14 @@
     if (busy || main.inert || button.disabled) return;
     const error = document.getElementById('episode-resource-remove-error');
     error.textContent = '';
-    if (scriptForm?.dataset.dirty || forms.some(form => form.dataset.dirty)) {
-      error.textContent = '还有未保存的剧本或关联修改，请先保存；若不保存，请先复制输入再刷新，然后删除。'; return;
-    }
+    const recovery = document.getElementById('episode-script-recovery');
+    const recoveryText = document.getElementById('episode-script-recovery-text');
+    const unsaved = scriptForm?.dataset.dirty || forms.some(form => form.dataset.dirty);
+    const paidRecovery = recovery && !recovery.hidden && recoveryText?.value;
+    const warning = (unsaved ? '\n本页有未保存的剧本或关联修改，删除成功后刷新会放弃这些输入，不会自动保存。请先复制保留；继续即确认放弃。' : '')
+      + (paidRecovery ? '\n本页还有未保存的模型返回内容，可能已计费，请先复制保留；继续即确认放弃这份恢复内容。' : '');
     const scope = button.dataset.whole === 'true' ? '这项在列表中的全部出场位置' : '这一处出场位置';
-    if (!window.confirm(`删除「${button.dataset.name}」的${scope}？只移除本集提取项／关联，不删除全剧共享档案，不影响其他集。重新提取会重新显示本次模型识别的内容。`)) return;
+    if (!window.confirm(`删除「${button.dataset.name}」的${scope}？只移除本集提取项／关联，不删除全剧共享档案，不影响其他集。重新提取会重新显示本次模型识别的内容。${warning}`)) return;
     busy = true; main.inert = true; button.disabled = true;
     let redirect;
     try {
@@ -96,7 +99,12 @@
     } catch (failure) {
       error.textContent = failure instanceof TypeError ? '删除结果未确认，请刷新核对；不会自动重试。' : failure.message;
     } finally { busy = false; main.inert = false; button.disabled = false; }
-    if (redirect) { window.location.hash = redirect.split('#')[1] ?? ''; window.location.reload(); }
+    if (redirect) {
+      if (scriptForm) scriptForm.dataset.dirty = '';
+      forms.forEach(form => { form.dataset.dirty = ''; });
+      if (paidRecovery) { recovery.hidden = true; recoveryText.value = ''; }
+      window.location.hash = redirect.split('#')[1] ?? ''; window.location.reload();
+    }
   });
   if (/^#occurrence-\d+$/.test(window.location.hash)) {
     const target = document.getElementById(window.location.hash.slice(1));

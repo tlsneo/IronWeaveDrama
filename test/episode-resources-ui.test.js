@@ -79,9 +79,10 @@ function resourceForm(candidateChoices = null) {
   });
   return Object.assign(form, { targets, button, error });
 }
-function resourcesPage(fetch, { forms = [resourceForm(['17', 'new', 'ignore'])], scriptDirty = '', hash = '', hashTarget = null, scriptPresent = true, confirmed = true } = {}) {
+function resourcesPage(fetch, { forms = [resourceForm(['17', 'new', 'ignore'])], scriptDirty = '', hash = '', hashTarget = null, scriptPresent = true, confirmed = true, recoveryValue = '' } = {}) {
   const main = { inert: false }, scriptForm = node({ dataset: { dirty: scriptDirty } });
   const events = {}, redirects = [], reloadWarnings = [], confirmations = [], removeError = node();
+  const recovery = node({ hidden: !recoveryValue }), recoveryText = node({ value: recoveryValue });
   runInNewContext(resourcesScript, {
     document: {
       addEventListener(event, handler) { assert.equal(event, 'click'); events.click = handler; },
@@ -90,6 +91,8 @@ function resourcesPage(fetch, { forms = [resourceForm(['17', 'new', 'ignore'])],
       getElementById(id) {
         if (id === 'episode-script-form') return scriptPresent ? scriptForm : null;
         if (id === 'episode-resource-remove-error') return removeError;
+        if (id === 'episode-script-recovery') return recovery;
+        if (id === 'episode-script-recovery-text') return recoveryText;
         if (id === hash.slice(1)) return hashTarget;
         throw new Error(`Unexpected id: ${id}`);
       },
@@ -104,11 +107,11 @@ function resourcesPage(fetch, { forms = [resourceForm(['17', 'new', 'ignore'])],
     },
     URLSearchParams, TypeError, Error, fetch,
   });
-  return { forms, main, scriptForm, redirects, reloadWarnings, events, removeError, confirmations,
+  return { forms, main, scriptForm, redirects, reloadWarnings, events, removeError, confirmations, recovery, recoveryText,
     remove(button) { return events.click({ preventDefault() {}, target: { closest(selector) { assert.equal(selector, '[data-resource-remove]'); return button; } } }); },
     beforeUnload: () => leave(events.beforeunload) };
 }
-function screenplayPage(fetch, { revision = '7', withExtract = true, confirmed = true, resources = [] } = {}) {
+function screenplayPage(fetch, { revision = '7', withExtract = true, confirmed = true, resources = [], removeButtons = [] } = {}) {
   const ids = ['episode-script-form', 'episode-script-source', 'episode-script-text', 'episode-script-notes', 'episode-script-api',
     'generate-episode-script', 'save-episode-script', 'episode-script-error', 'episode-script-status', 'episode-script-recovery', 'episode-script-recovery-text'];
   if (withExtract) ids.push('extract-episode-resources');
@@ -136,7 +139,10 @@ function screenplayPage(fetch, { revision = '7', withExtract = true, confirmed =
         assert.equal(selector, dirtyResourcesSelector);
         return resources.find(target => target.dataset.dirty === 'true') ?? null;
       },
-      querySelectorAll(selector) { assert.equal(selector, resourceFormsSelector); return resources; },
+      querySelectorAll(selector) {
+        if (selector === '[data-resource-remove]') return removeButtons;
+        assert.equal(selector, resourceFormsSelector); return resources;
+      },
     },
     window: {
       confirm(message) { confirmations.push(message); return confirmed; },
@@ -335,11 +341,54 @@ test('删除图标先确认本集范围，发送版本与精确目标，阻止�
 test('取消、未保存修改及删除失败都不丢输入、不移除DOM、不自动重试，成功前不刷新', async () => {
   const button = node({ dataset: { url: `${base}/remove-resources`, batchRevision: '5', scriptRevision: '7', targets: '{"type":"occurrences","items":[{"id":9,"revision":3}]}', name: '林秋', whole: 'false' } });
   const cancelled = resourcesPage(() => assert.fail('取消不调用'), { confirmed: false }); await cancelled.remove(button); assert.deepEqual(cancelled.redirects, []);
-  const dirty = resourcesPage(() => assert.fail('未保存不调用')); dirty.forms[0].fire('input'); await dirty.remove(button);
-  assert.match(dirty.removeError.textContent, /未保存/); assert.equal(dirty.forms[0].dataset.dirty, 'true');
+  const dirty = resourcesPage(() => assert.fail('未确认放弃不调用'), { confirmed: false }); dirty.forms[0].fire('input'); await dirty.remove(button);
+  assert.match(dirty.confirmations[0], /未保存.*放弃/); assert.equal(dirty.forms[0].dataset.dirty, 'true');
   for (const failure of [async () => rejected({ error: '版本冲突' }), async () => { throw new TypeError('offline'); }, async () => ({ ok: true, json: async () => { throw new SyntaxError('bad json'); } })]) {
     let calls = 0; const p = resourcesPage(async () => { calls++; return failure(); }); await p.remove(button);
     assert.equal(calls, 1); assert.deepEqual(p.redirects, []); assert.ok(p.removeError.textContent); assert.equal(p.main.inert, false); assert.equal(button.disabled, false);
+  }
+});
+
+test('删除前明确确认放弃未保存关联、剧本和付费恢复内容，成功才清除脏状态；取消或失败保留全部输入', async () => {
+  const button = node({ dataset: { url: `${base}/remove-resources`, batchRevision: '5', scriptRevision: '7', targets: '{"type":"candidates","items":[0]}', name: '林秋', whole: 'false' } });
+  for (const outcome of ['cancel', 'failure', 'success']) {
+    let calls = 0;
+    const p = resourcesPage(async () => { calls++; return outcome === 'failure' ? rejected({ error: '版本冲突' }) : ok({ redirect: `${redirect}#episode-resources` }); }, { confirmed: outcome !== 'cancel', scriptDirty: 'true', recoveryValue: '已计费但未保存的稿件' });
+    p.forms[0].fire('input');
+    const controls = p.forms[0].targets[0].controls; controls['[data-resource-details]'].value = '待保留的修改';
+    await p.remove(button);
+    assert.match(p.confirmations[0], /未保存的剧本或关联修改.*不会自动保存/);
+    assert.match(p.confirmations[0], /可能已计费.*确认放弃/);
+    assert.equal(controls['[data-resource-details]'].value, '待保留的修改');
+    assert.equal(p.main.inert, false); assert.equal(button.disabled, false);
+    assert.equal(calls, outcome === 'cancel' ? 0 : 1);
+    if (outcome === 'success') {
+      assert.equal(p.forms[0].dataset.dirty, ''); assert.equal(p.scriptForm.dataset.dirty, '');
+      assert.equal(p.recovery.hidden, true); assert.equal(p.recoveryText.value, '');
+      assert.deepEqual(p.reloadWarnings, [false]); assert.equal(p.redirects.length, 1);
+    } else {
+      assert.equal(p.forms[0].dataset.dirty, 'true'); assert.equal(p.scriptForm.dataset.dirty, 'true');
+      assert.equal(p.recovery.hidden, false); assert.equal(p.recoveryText.value, '已计费但未保存的稿件');
+      assert.deepEqual(p.redirects, []);
+    }
+  }
+});
+
+test('保存或生成剧本后同步精确删除按钮版本，不改旧草稿的确认版本、未保存关联或恢复内容', async () => {
+  for (const action of ['save', 'generate', 'failed-generation-after-save', 'failed-save']) {
+    const resource = resourceForm(['new']); resource.dataset.dirty = 'true';
+    const removeButtons = [node({ dataset: { scriptRevision: '7', batchRevision: '5', targets: 'unchanged-targets' } })];
+    const p = screenplayPage(async url => {
+      if (url.endsWith('/script')) return action === 'failed-save' ? rejected({ error: '保存失败' }) : ok({ revision: 8 });
+      return action === 'failed-generation-after-save' ? rejected({ error: '生成失败', recoveryText: '付费返回稿' }) : ok({ revision: 9, script: '新剧本', notes: '新说明', message: '完成' });
+    }, { resources: [resource], removeButtons });
+    p.input('episode-script-text', '人工修改');
+    if (action === 'save' || action === 'failed-save') await p.save(); else await p.generate();
+    assert.equal(removeButtons[0].dataset.scriptRevision, action === 'generate' ? '9' : action === 'failed-save' ? '7' : '8');
+    assert.equal(removeButtons[0].dataset.batchRevision, '5'); assert.equal(removeButtons[0].dataset.targets, 'unchanged-targets');
+    assert.equal(resource.dataset.scriptRevision, '7'); assert.equal(resource.dataset.dirty, 'true');
+    assert.deepEqual(p.redirects, []); assert.equal(p.main.inert, false);
+    if (action === 'failed-generation-after-save') assert.equal(p.nodes['episode-script-recovery-text'].value, '付费返回稿');
   }
 });
 

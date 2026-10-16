@@ -25,9 +25,14 @@
     }
     return result;
   }
+  function updateRevision(revision) {
+    form.dataset.revision = String(revision);
+    // 删除只核对精确目标，不把旧提取草稿冒充新剧本的已确认资源。
+    document.querySelectorAll('[data-resource-remove]').forEach(button => { button.dataset.scriptRevision = String(revision); });
+  }
   async function saveDraft() {
     const result = await post(form.dataset.url, new URLSearchParams({ source: source.value, script: script.value, notes: notes.value, revision: form.dataset.revision }));
-    form.dataset.revision = String(result.revision);
+    updateRevision(result.revision);
     form.dataset.dirty = '';
     return result;
   }
@@ -70,7 +75,7 @@
           replaceConfirmed: replacement ? 'yes' : 'no',
         }));
         script.value = result.script; notes.value = result.notes;
-        form.dataset.revision = String(result.revision); form.dataset.dirty = '';
+        updateRevision(result.revision); form.dataset.dirty = '';
         notes.closest('details').open = true;
         recovery.hidden = true; recoveryText.value = '';
         status.textContent = result.message;
