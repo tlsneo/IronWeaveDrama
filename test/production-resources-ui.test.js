@@ -128,7 +128,7 @@ test('SSR 定妆：项目内选择、同名带 ID、可存空演员、多件素�
   assert.match(result.content, /查看图片 #502<\/a><span>无效/);
   assert.match(result.content, /查看图片 #503<\/a><span>有效 · 已清除 · 旧依据待核对/);
   assert.doesNotMatch(result.content, /images\/504/);
-  assert.match(result.content, /定妆资料及其全部生成图将删除.*已关联分镜的定妆选择会失效.*不会删除基础演员、服饰或道具/);
+  assert.match(result.content, /定妆资料和旧图片将删除.*新生成媒体保留在项目历史.*已关联分镜的定妆选择会失效.*不会删除基础演员、服饰或道具/);
   assert.match(result.description, /可在分镜出镜角色旁手动关联/);
   assert.match(result.content, /&lt;\/textarea&gt;&lt;script&gt;/);
   assert.doesNotMatch(result.content, /id="look-generate"[^>]*disabled/);

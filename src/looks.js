@@ -1,3 +1,5 @@
+import { generateOperation } from './generation-operations.js';
+import { readStoredImage, storedImageBytes } from './media-adoption.js';
 import { createHash } from 'node:crypto';
 import { inTransaction } from './database.js';
 import { findCharacter, characterFields } from './characters.js';
@@ -26,7 +28,7 @@ export function lookInputs(database, projectId, look) {
     const actor = findCharacter(database, projectId, look.character_id);
     const columns = 'id, mime, width, height, length(image) AS bytes';
     let image = database.prepare(`SELECT ${columns} FROM character_boards WHERE character_id = ? AND valid = 1 AND cleared = 0 ORDER BY id DESC LIMIT 1`).get(actor.id);
-    if (image) image = { ...image, type: 'boards' };
+    if (image) image = { ...image, bytes: storedImageBytes(database, 'character_boards', image.id, image.bytes), type: 'boards' };
     else {
       image = database.prepare(`SELECT ${columns} FROM character_references WHERE character_id = ? AND cleared = 0 ORDER BY id DESC LIMIT 1`).get(actor.id);
       if (image) image = { ...image, type: 'references' };
@@ -96,7 +98,7 @@ export async function generateLookImage(database, projectId, id, form) {
   return withLookLock(database, id, async () => {
     const actor = inputs.character;
     const table = actor.image.type === 'boards' ? 'character_boards' : 'character_references';
-    const first = database.prepare(`SELECT image FROM ${table} WHERE id = ? AND character_id = ?`).get(actor.image.id, actor.id);
+    const first = { image: await readStoredImage(database, table, actor.image.id) };
     const files = [{ metadata: actor.image, bytes: first?.image }, ...inputs.assets.map(asset => ({ metadata: asset.image,
       bytes: database.prepare('SELECT image FROM production_asset_images WHERE id = ? AND asset_id = ?').get(asset.image.id, asset.id)?.image }))];
     const prompt = manualLookPrompt(inputs), body = new FormData();
@@ -107,6 +109,13 @@ export async function generateLookImage(database, projectId, id, form) {
       if (details.mime !== file.metadata.mime) reject(400, '参考图类型与记录不符，没有调用模型。');
       // 固定多图协议；即使只选演员也使用image[]，不换字段重试或忽略素材。
       body.append('image[]', new Blob([file.bytes], { type: details.mime }), `reference-${index + 1}.${details.mime === 'image/jpeg' ? 'jpg' : details.mime.split('/')[1]}`);
+    }
+    if (config.protocol === 'ironweave2') {
+      const operation = await generateOperation(database, { projectId, kind: 'look', targetId: id, config,
+        source: { revision: look.revision, inputRevision: inputs.revision, inputs, prompt, model: config.model },
+        endpoint: '/images/edits', body, expected: { size: imageSizes[inputs.aspectRatio] } });
+      return { id: look.id, revision: look.revision, imageUrl: operation.mediaUrl, operation,
+        message: `媒体已保存，${operation.deliveryConfirmed ? '交付已确认' : '交付确认未确定'}；请人工采用，原定妆不变。`, redirect: `/projects/${projectId}/operations` };
     }
     let bytes, details;
     try {

@@ -21,18 +21,22 @@ export async function renderSettings(database, query) {
     }
     content = `<section class="creation-panel settings-panel" aria-labelledby="api-config-title">
       <a class="episode-back" href="${escapeHtml(listUrl)}">← 配置列表</a>
-      <div class="settings-panel-heading"><h3 id="api-config-title">${escapeHtml(config.name || '添加 API 配置')}</h3><span>OpenAI 兼容</span></div>
+      <div class="settings-panel-heading"><h3 id="api-config-title">${escapeHtml(config.name || '添加 API 配置')}</h3><span>显式协议</span></div>
       <form id="api-config-form" action="/settings/api${config.id ? `/${config.id}` : ''}" method="post" data-id="${config.id ?? ''}" data-configured="${Boolean(config.apiKey)}" autocomplete="off">
         <div class="form-field"><label for="api-name">配置名称</label><input id="api-name" name="name" type="text" value="${escapeHtml(config.name)}" maxlength="80" required></div>
         <div class="form-field"><label for="api-type">API 类型</label><select id="api-type" name="type">${[...apiTypes].map(([value, label]) => `<option value="${value}" ${value === config.type ? 'selected' : ''}>${label}</option>`).join('')}</select></div>
         <div class="form-field"><label for="api-base-url">Base URL</label><input id="api-base-url" name="baseUrl" type="url" value="${escapeHtml(config.baseUrl)}" maxlength="2048" required aria-describedby="api-url-help"><p id="api-url-help" class="field-help">填写包含版本前缀的基础地址，程序不会自动补 /v1。模型测试会按类型请求聊天、生图或图片编辑接口。</p></div>
         <div class="form-field"><label for="api-key">API Key</label><input id="api-key" name="apiKey" type="password" maxlength="4096" autocomplete="new-password" ${config.apiKey ? '' : 'required'} aria-describedby="api-key-state"><p id="api-key-state" class="field-help">${config.apiKey ? '这条配置已保存密钥。留空保持原密钥，填写新值则替换。' : '请填写这条配置的密钥。'}</p></div>
         <div class="form-field"><label for="api-model">模型名称</label><input id="api-model" name="model" type="text" value="${escapeHtml(config.model)}" maxlength="200" required></div>
+        <div class="form-field"><label for="api-protocol">协议（不会自动探测或降级）</label><select id="api-protocol" name="protocol"><option value="legacy" ${config.protocol !== 'ironweave2' ? 'selected' : ''}>旧同步 JSON / OpenAI 兼容</option><option value="ironweave2" ${config.protocol === 'ironweave2' ? 'selected' : ''}>IronWeave protocol 2</option></select></div>
+        <div class="form-field"><label for="api-test-size">测试图片尺寸（宽x高）</label><input id="api-test-size" name="testSize" value="${escapeHtml(config.testSize || '1024x1024')}" required pattern="[1-9][0-9]*x[1-9][0-9]*"></div>
+        <div class="form-field"><label for="api-video-profiles">视频参数组合 JSON（手工登记，不代表实机已验证）</label><textarea id="api-video-profiles" name="videoProfiles">${escapeHtml(JSON.stringify(config.videoProfiles || []))}</textarea><p>每项仅 size、frames、fps。未登记则不能生成视频，Iron 仍须通过已验证配置校验；不取整时长、不自动改速。</p></div>
         <div class="dialog-actions"><button id="save-api-settings" class="create-button" type="submit">保存配置</button></div>
       </form>
       <div id="api-test-reference" ${['image_to_image', 'image_edit'].includes(config.type) ? '' : 'hidden'}>
         <div class="form-field"><label for="api-test-reference-image">测试参考图</label><input id="api-test-reference-image" type="file" accept="image/png,image/jpeg,image/webp" aria-describedby="api-reference-help"><p id="api-reference-help" class="field-help">PNG、JPEG 或 WebP，最多 5 MiB。图生图和编辑测试使用 OpenAI 兼容 /images/edits multipart 协议；参考图只用于本次测试，不存入角色库。</p></div>
       </div>
+      <p><a href="/operations">查看测试操作、恢复与交付确认</a></p>
       <div class="settings-check"><button id="check-api-connection" class="theme-toggle" type="button" ${config.apiKey ? '' : 'disabled'}>测试模型（可能计费）</button><p class="field-help">先保存配置，再实际调用所填模型。文本发送一次短请求；图片请求生成或编辑一张。可能扣费，不自动重试；图片生成可能需要几分钟。</p></div>
       <p id="settings-error" class="form-error" role="alert"></p>
       <p id="settings-status" class="settings-status" role="status" aria-live="polite"></p>

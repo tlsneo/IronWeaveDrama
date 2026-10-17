@@ -46,7 +46,7 @@
     }
   }
   async function post(action, url, body) {
-    const response = await fetch(url, { method: 'POST', body });
+    const response = await (action === 'generate' && window.IronGeneration ? window.IronGeneration.request : fetch)(url, { method: 'POST', body });
     let result;
     try { result = await response.json(); } catch { throw new TypeError('服务响应无法识别'); }
     if (!result || typeof result !== 'object' || Array.isArray(result)) throw new TypeError('服务响应无效');

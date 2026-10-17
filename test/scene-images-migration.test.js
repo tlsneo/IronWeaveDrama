@@ -63,7 +63,7 @@ test('版本 13 场景图片迁移失败完整回滚，升级 14 保留旧资料
     database.close(); database = undefined;
 
     database = openDatabase(filename);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 16);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 18);
     assert.equal(database.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
     assert.deepEqual(snapshot(database), original);
     assert.deepEqual(imageSnapshot(database), [[], []]);
@@ -81,7 +81,7 @@ test('版本 13 场景图片迁移失败完整回滚，升级 14 保留旧资料
     database.close(); database = undefined;
 
     database = openDatabase(filename);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 16);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 18);
     assert.deepEqual(snapshot(database), original);
     assert.deepEqual(imageSnapshot(database), savedImages);
     database.prepare('DELETE FROM scene_references WHERE id = ?').run(referenceId);

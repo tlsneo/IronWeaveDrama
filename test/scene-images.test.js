@@ -389,7 +389,7 @@ test('schema 13 升级到 14 保留原资源；迁移失败回滚，图片/参�
     assert.deepEqual(database.prepare("SELECT name FROM sqlite_master WHERE name IN ('scene_images', 'scene_references')").all(), []);
     assert.deepEqual(tables.map(table => database.prepare(`SELECT * FROM ${table}`).all()), original);
     database.close(); database = openDatabase(filename);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 16);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 18);
     assert.deepEqual(tables.map(table => database.prepare(`SELECT * FROM ${table}`).all()), original);
     assert.deepEqual(rows(database), []);
     const { referenceId } = await saveSceneReference(database, 1, 1, referenceForm());

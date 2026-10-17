@@ -338,6 +338,70 @@ export function openDatabase(filename) {
         PRAGMA user_version = 16;
       `);
     }
+    if (database.prepare('PRAGMA user_version').get().user_version < 17) {
+      const configSql = database.prepare("SELECT sql FROM sqlite_master WHERE name = 'api_configs'").get().sql;
+      if (!configSql.includes("'video'")) {
+        database.exec(configSql.replace(/^CREATE TABLE\s+(?:"[^"]+"|\w+)/i, 'CREATE TABLE api_configs_v17').replace("'image_edit'", "'image_edit', 'video'"));
+        database.exec('INSERT INTO api_configs_v17 SELECT * FROM api_configs; DROP TABLE api_configs; ALTER TABLE api_configs_v17 RENAME TO api_configs; CREATE INDEX api_configs_type ON api_configs(type, id);');
+      }
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS api_protocols (
+          config_id INTEGER PRIMARY KEY,
+          protocol TEXT NOT NULL CHECK(protocol IN ('legacy', 'ironweave2')),
+          test_size TEXT NOT NULL DEFAULT '',
+          video_profiles TEXT NOT NULL DEFAULT '[]'
+        );
+        CREATE TABLE IF NOT EXISTS generation_operations (
+          id TEXT PRIMARY KEY,
+          project_id INTEGER,
+          kind TEXT NOT NULL,
+          target_id INTEGER NOT NULL,
+          config_id INTEGER NOT NULL,
+          config_json TEXT NOT NULL,
+          source_json TEXT NOT NULL,
+          request_json TEXT NOT NULL,
+          task_id TEXT UNIQUE,
+          task_state TEXT,
+          accepted_json TEXT,
+          event_json TEXT,
+          local_state TEXT NOT NULL DEFAULT 'submitting',
+          metadata_json TEXT,
+          ack_json TEXT,
+          active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0,1)),
+          error TEXT NOT NULL DEFAULT '',
+          adopted INTEGER NOT NULL DEFAULT 0,
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS generation_active ON generation_operations(ifnull(project_id,0), kind, target_id) WHERE active = 1;
+        CREATE TABLE IF NOT EXISTS generated_media_links (
+          table_name TEXT NOT NULL, row_id INTEGER NOT NULL, operation_id TEXT NOT NULL REFERENCES generation_operations(id),
+          PRIMARY KEY(table_name, row_id)
+        );
+        CREATE TABLE IF NOT EXISTS video_clips (
+          id INTEGER PRIMARY KEY AUTOINCREMENT,
+          project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+          episode_id INTEGER NOT NULL REFERENCES episodes(id) ON DELETE CASCADE,
+          name TEXT NOT NULL, revision INTEGER NOT NULL DEFAULT 1,
+          shots_json TEXT NOT NULL, source_json TEXT NOT NULL, sections_json TEXT NOT NULL,
+          pictures_json TEXT NOT NULL, subjects_json TEXT NOT NULL,
+          profile_json TEXT NOT NULL,
+          adopted_operation_id TEXT
+        );
+        PRAGMA user_version = 17;
+      `);
+    }
+    if (database.prepare('PRAGMA user_version').get().user_version < 18) {
+      database.exec(`
+        CREATE TABLE IF NOT EXISTS media_cleanup (
+          operation_id TEXT PRIMARY KEY,
+          project_id INTEGER NOT NULL,
+          last_error TEXT NOT NULL DEFAULT '',
+          created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+        );
+        CREATE INDEX IF NOT EXISTS media_cleanup_project ON media_cleanup(project_id, operation_id);
+        PRAGMA user_version = 18;
+      `);
+    }
     if (database.prepare('PRAGMA foreign_key_check').all().length) throw new Error('数据库关系检查失败，升级已回滚。');
     database.exec('COMMIT');
     database.exec('PRAGMA foreign_keys = ON');

@@ -47,7 +47,7 @@
     activeButton.textContent = action === 'clear-image' ? '清空中…' : '生成中…';
     statusElement.textContent = '';
     try {
-      const response = await fetch(form.dataset.url.replace(/generate$/, action), { method: 'POST', body });
+      const response = await (action === 'generate' && window.IronGeneration ? window.IronGeneration.request : fetch)(form.dataset.url.replace(/generate$/, action), { method: 'POST', body });
       const result = await response.json();
       if (!response.ok) {
         if (result.recoveryImage) {
@@ -59,6 +59,7 @@
         throw new Error(result.error ?? '图片操作失败。');
       }
       statusElement.textContent = result.message ?? '';
+      if (result.operation) { window.location.assign(form.dataset.url.split('/').slice(0, 3).join('/') + '/operations'); return; }
       if (result.valid || result.cleared) {
         busy = false;
         window.location.reload();

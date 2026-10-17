@@ -58,14 +58,14 @@ test('真实14→15迁移失败回滚完整schema／资料／序列，重试和�
     assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'episode_storyboards'").get(), undefined);
     assert.deepEqual(snapshot(db), original); assert.deepEqual(schema(db), originalSchema); assert.deepEqual(sequences(db), originalSequences);
     db.close(); db = openDatabase(filename);
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 16);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 18);
     assert.equal(db.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
     assert.deepEqual(snapshot(db), original); assert.deepEqual(sequences(db), originalSequences);
     assert.deepEqual(db.prepare('SELECT * FROM episode_storyboards').all(), []);
     for (const episode of [20, 21, 22, 30]) insertPlan(db, episode);
     const plans = db.prepare('SELECT * FROM episode_storyboards ORDER BY episode_id').all();
     db.close(); db = openDatabase(filename);
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 16);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 18);
     assert.deepEqual(snapshot(db), original); assert.deepEqual(db.prepare('SELECT * FROM episode_storyboards ORDER BY episode_id').all(), plans);
     assert.deepEqual(readEpisodeStoryboards(db, 20), { revision: 3, scriptRevision: 2, resourceRevision: 'fixture-resource-hash', maxShotSeconds: 5, reviewed: true, shots: JSON.parse(shots) });
     db.exec('DELETE FROM api_configs WHERE id = 60'); assert.deepEqual(db.prepare('SELECT * FROM episode_storyboards ORDER BY episode_id').all(), plans);

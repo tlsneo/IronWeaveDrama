@@ -28,6 +28,7 @@
       const storyboardRecovery = document.getElementById('storyboard-recovery');
       if (storyboardRecovery) storyboardRecovery.hidden = true;
       busy = false;
+      if (result.message) window.alert(result.message);
       window.location.assign(result.redirect);
     } catch (error) {
       errorElement.textContent = error instanceof TypeError ? '未收到删除结果，请刷新页面查看。' : error.message;

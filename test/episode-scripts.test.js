@@ -236,7 +236,7 @@ test('版本 10 升级保留所有现有资料，新增空剧本表；失败回�
     database = new DatabaseSync(filename); assert.equal(database.prepare('PRAGMA user_version').get().user_version, 10);
     assert.deepEqual(snapshot(database), original); assert.equal(database.prepare("SELECT name FROM sqlite_master WHERE name = 'episode_scripts'").get(), undefined);
     database.close(); database = openDatabase(filename);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 16); assert.deepEqual(snapshot(database), original);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 18); assert.deepEqual(snapshot(database), original);
     database.exec("INSERT INTO episode_scripts (episode_id, source, script, notes, revision) VALUES (1, '原文', '剧本', '说明', 1)");
     database.close(); database = openDatabase(filename); assert.equal(database.prepare('SELECT script FROM episode_scripts').get().script, '剧本');
     assert.deepEqual(database.prepare('PRAGMA foreign_key_check').all(), []);

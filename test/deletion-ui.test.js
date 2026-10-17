@@ -6,7 +6,7 @@ import { runInNewContext } from 'node:vm';
 const script = await readFile(new URL('../public/delete.js', import.meta.url), 'utf8');
 function page(fetch) {
   const events = {};
-  const redirects = [], confirmations = [];
+  const redirects = [], confirmations = [], alerts = [];
   let confirmed = true;
   const main = { inert: false };
   const error = { textContent: '' };
@@ -17,10 +17,10 @@ function page(fetch) {
   const button = { disabled: false, textContent: '删除', dataset: { deleteUrl: '/projects/1/characters/2/delete', deleteName: '林秋', deleteMessage: '确定删除林秋？角色和图片将删除，无法恢复。' }, closest: () => main.inert ? main : null };
   runInNewContext(script, {
     document: { getElementById: id => ({ 'delete-error': error, 'character-form': characterForm, 'scene-form': sceneForm, 'episode-script-form': scriptForm, 'episode-script-recovery': scriptRecovery, 'episode-resource-candidates': candidates, 'storyboard-form': storyboardForm, 'storyboard-recovery': storyboardRecovery })[id] ?? null, querySelector: () => main, querySelectorAll: () => [occurrenceForm], addEventListener: (event, handler) => { events[event] = handler; } },
-    window: { confirm(message) { confirmations.push(message); return confirmed; }, location: { assign: url => redirects.push(url) }, addEventListener: (event, handler) => { events[event] = handler; } },
+    window: { alert: message => alerts.push(message), confirm(message) { confirmations.push(message); return confirmed; }, location: { assign: url => redirects.push(url) }, addEventListener: (event, handler) => { events[event] = handler; } },
     fetch, URLSearchParams, Error, TypeError,
   });
-  return { main, error, button, characterForm, scriptForm, scriptRecovery, storyboardForm, storyboardRecovery, sceneForm, candidates, occurrenceForm, redirects, confirmations, confirm(value) { confirmed = value; }, click: () => events.click({ target: { closest: () => button }, preventDefault() {} }), beforeUnload: event => events.beforeunload(event) };
+  return { main, error, button, characterForm, scriptForm, scriptRecovery, storyboardForm, storyboardRecovery, sceneForm, candidates, occurrenceForm, redirects, confirmations, alerts, confirm(value) { confirmed = value; }, click: () => events.click({ target: { closest: () => button }, preventDefault() {} }), beforeUnload: event => events.beforeunload(event) };
 }
 
 test('删除必须先确认，取消不发送请求；确认后显示删除中、防重复请求，成功只跳转一次且不再弹未保存提醒', async () => {
@@ -85,4 +85,11 @@ test('其他操作锁定表单时不弹删除确认，也不发送请求', async
   await p.click();
   assert.equal(calls, 0);
   assert.deepEqual(p.confirmations, []);
+});
+
+
+test('项目已删除而媒体待清理时，先明确显示待重试消息再导航，不显示删除失败', async () => {
+  const p = page(async () => ({ ok: true, json: async () => ({ deleted: true, mediaCleanupPending: true, message: '项目已删除，媒体清理待重试。', redirect: '/' }) }));
+  await p.click();
+  assert.deepEqual(p.alerts, ['项目已删除，媒体清理待重试。']); assert.deepEqual(p.redirects, ['/']); assert.equal(p.error.textContent, '');
 });

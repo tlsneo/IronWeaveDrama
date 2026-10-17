@@ -197,7 +197,7 @@ test('版本 8 升级保留完整图片、配置和归属，启用不复用 ID�
     assert.equal(database.prepare("SELECT name FROM sqlite_master WHERE name LIKE '%_new'").get(), undefined);
     database.close();
     database = openDatabase(filename);
-    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 16);
+    assert.equal(database.prepare('PRAGMA user_version').get().user_version, 18);
     assert.equal(database.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
     original[4] = original[4].map(row => Object.assign(Object.create(null), row, { reference_id: null }));
     assert.deepEqual(snapshot(database), original);

@@ -1,3 +1,4 @@
+import { generateOperation } from './generation-operations.js';
 import { createHash } from 'node:crypto';
 import { characterFields } from './characters.js';
 import { readApiConfig } from './settings.js';
@@ -93,6 +94,13 @@ export async function generateResourceImage(kind, database, projectId, id, form)
       const source = database.prepare(`SELECT image FROM ${d.references} WHERE id = ? AND ${d.column} = ?`).get(reference.id, id);
       body = new FormData(); body.set('model', config.model); body.set('prompt', prompt); body.set('n', '1'); body.set('size', size);
       body.set('image', new Blob([source.image], { type: reference.mime }), `reference.${reference.mime === 'image/jpeg' ? 'jpg' : reference.mime.split('/')[1]}`);
+    }
+    if (config.protocol === 'ironweave2') {
+      const operation = await generateOperation(database, { projectId, kind, targetId: id, config,
+        source: { revision, referenceId: reference?.id ?? null, model: config.model, prompt, ratio },
+        endpoint: reference ? '/images/edits' : '/images/generations', body, expected: { size } });
+      return { valid: false, operation, imageUrl: operation.mediaUrl, width: operation.metadata.width, height: operation.metadata.height,
+        message: `媒体已保存，${operation.deliveryConfirmed ? '交付已确认' : '交付确认未确定'}；请在操作历史检查后人工采用，尚未替换当前图片。` };
     }
     const response = await callModel(config, reference ? '/images/edits' : '/images/generations', body);
     const bytes = await loadImage(readImageResult(config, response), config.baseUrl);

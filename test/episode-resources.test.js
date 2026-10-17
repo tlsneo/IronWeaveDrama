@@ -581,7 +581,7 @@ test('版本12升级增加待核对标记而不改变旧关联／档案，失败
   let db = new DatabaseSync(filename); assert.equal(db.prepare('PRAGMA user_version').get().user_version, 12);
   assert.deepEqual(snapshots(db), original); assert.deepEqual(readEpisodeResources(db, 1), draft);
   assert.ok(!db.prepare('PRAGMA table_info(episode_occurrences)').all().some(row => row.name === 'needs_review')); db.close();
-  db = openDatabase(filename); assert.equal(db.prepare('PRAGMA user_version').get().user_version, 16);
+  db = openDatabase(filename); assert.equal(db.prepare('PRAGMA user_version').get().user_version, 18);
   const upgraded = snapshots(db); assert.deepEqual(upgraded.characters, original.characters); assert.deepEqual(upgraded.scenes, original.scenes);
   assert.deepEqual(upgraded.occurrences.map(({ needs_review, ...row }) => row), original.occurrences.map(row => ({ ...row })));
   assert.ok(upgraded.occurrences.every(row => row.needs_review === 0)); assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
@@ -605,5 +605,5 @@ test('新资源、候选、人工关联和移除状态重启后保留，版本11
   t.mock.method(DatabaseSync.prototype, 'exec', function(sql) { const result = exec.call(this, sql); if (sql.includes('PRAGMA user_version = 12')) throw new Error('resource migration failure'); return result; });
   assert.throws(() => openDatabase(filename), /resource migration failure/); t.mock.restoreAll();
   db = new DatabaseSync(filename); assert.equal(db.prepare('PRAGMA user_version').get().user_version, 11); assert.equal(db.prepare("SELECT name FROM sqlite_master WHERE name = 'scenes'").get(), undefined); assert.deepEqual(db.prepare('SELECT * FROM characters').all(), oldCharacters); assert.deepEqual(db.prepare('SELECT * FROM episode_scripts').all(), oldScripts); db.close();
-  db = openDatabase(filename); assert.equal(db.prepare('PRAGMA user_version').get().user_version, 16); assert.deepEqual(db.prepare('SELECT * FROM characters').all(), oldCharacters); assert.deepEqual(db.prepare('SELECT * FROM episode_scripts').all(), oldScripts); assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []); db.close();
+  db = openDatabase(filename); assert.equal(db.prepare('PRAGMA user_version').get().user_version, 18); assert.deepEqual(db.prepare('SELECT * FROM characters').all(), oldCharacters); assert.deepEqual(db.prepare('SELECT * FROM episode_scripts').all(), oldScripts); assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []); db.close();
 });

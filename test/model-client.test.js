@@ -114,3 +114,16 @@ test('显式受限测试仍会终止等待，无自动重试；不会把这种�
   await assert.rejects(callModel(f.config, '/chat/completions', body, 30), error => { assert.equal(error.status, 502); assert.match(error.message, /失败或超时.*没有自动重试/); return true; });
   assert.ok(f.requests.length <= 1);
 });
+
+test('旧协议显式无限等待的 FormData 仍正确编码，不把表单对象直接写入原生请求', async t => {
+  const { Readable } = await import('node:stream');
+  let fields;
+  const server = createServer(async (request, response) => {
+    fields = await new Request('http://127.0.0.1', { method: 'POST', headers: request.headers, body: Readable.toWeb(request), duplex: 'half' }).formData();
+    response.end(JSON.stringify({ data: [{ b64_json: 'fixture' }] }));
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)));
+  const body = new FormData(); body.set('prompt', '保持原文'); body.append('image[]', new Blob(['first']), 'first.png'); body.append('image[]', new Blob(['second']), 'second.png');
+  const result = await callModel({ type: 'image_to_image', baseUrl: `http://127.0.0.1:${server.address().port}`, apiKey: 'synthetic' }, '/images/edits', body, null);
+  assert.equal(result.data.length, 1); assert.equal(fields.get('prompt'), '保持原文'); assert.deepEqual(await Promise.all(fields.getAll('image[]').map(file => file.text())), ['first', 'second']);
+});

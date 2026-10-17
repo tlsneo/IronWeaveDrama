@@ -46,14 +46,14 @@ export function renderCreation(database, projectId, view, query) {
         <summary><span class="season-number">S${String(seasonIndex + 1).padStart(2, '0')}</span><span class="season-name">${escapeHtml(season.name)}</span><span class="season-count">${items.length} 集</span></summary>
         <div class="season-body">
           <div class="season-toolbar">
-            <div class="item-actions">${nameButton(seasonUrl, '重命名', season.name)}${moveButtons(seasonUrl, season.name, seasonIndex, seasons.length)}${deleteButton(`${seasonUrl}/delete`, season.name, `确定删除“${season.name}”？本季全部集将一并删除，无法恢复。`)}</div>
+            <div class="item-actions">${nameButton(seasonUrl, '重命名', season.name)}${moveButtons(seasonUrl, season.name, seasonIndex, seasons.length)}${deleteButton(`${seasonUrl}/delete`, season.name, `确定删除“${season.name}”？本季全部集将一并删除，无法恢复；新生成媒体及交付记录保留在项目历史，旧来源不可再采用。`)}</div>
             ${nameButton(`${base}/episodes`, '添加集', `第${items.length + 1}集`, season.id)}
           </div>
           ${items.length ? `<ol class="episode-list">${items.map((episode, index) => {
             const url = `${base}/episodes/${episode.id}`;
             return `<li class="episode-row">
               <a class="episode-link" href="${episodeLink(episode)}"><span class="episode-number">${String(index + 1).padStart(2, '0')}</span><span>${escapeHtml(episode.name)}</span></a>
-              <div class="item-actions">${nameButton(url, '重命名', episode.name)}${moveButtons(url, episode.name, index, items.length)}${deleteButton(`${url}/delete`, episode.name, `确定删除“${episode.name}”？该集及其剧本、分镜将删除，无法恢复。`)}</div>
+              <div class="item-actions">${nameButton(url, '重命名', episode.name)}${moveButtons(url, episode.name, index, items.length)}${deleteButton(`${url}/delete`, episode.name, `确定删除“${episode.name}”？该集及其剧本、分镜将删除，无法恢复；新生成媒体及交付记录保留在项目历史，旧来源不可再采用。`)}</div>
             </li>`;
           }).join('')}</ol>` : '<p class="season-empty">本季还没有集。</p>'}
         </div>
@@ -71,7 +71,7 @@ export function renderCreation(database, projectId, view, query) {
     const content = seasons.map(season => {
       const items = episodes.filter(episode => episode.season_id === season.id);
       return `<section class="script-season"><h3>${escapeHtml(season.name)}</h3>
-        ${items.length ? `<ul class="script-links">${items.map(episode => `<li><a href="${storyboardList ? `${base}?view=storyboards&episode=${episode.id}` : episodeLink(episode)}">${escapeHtml(episode.name)}<span>本集${storyboardList ? '分镜' : '剧本'} →</span></a>${deleteButton(`${base}/episodes/${episode.id}/delete`, episode.name, `确定删除“${episode.name}”？该集及其剧本、分镜将删除，无法恢复。`)}</li>`).join('')}</ul>` : `<p class="season-empty">还没有分集。<a href="${base}?view=seasons&season=${season.id}">去添加集 →</a></p>`}
+        ${items.length ? `<ul class="script-links">${items.map(episode => `<li><a href="${storyboardList ? `${base}?view=storyboards&episode=${episode.id}` : episodeLink(episode)}">${escapeHtml(episode.name)}<span>本集${storyboardList ? '分镜' : '剧本'} →</span></a>${deleteButton(`${base}/episodes/${episode.id}/delete`, episode.name, `确定删除“${episode.name}”？该集及其剧本、分镜将删除，无法恢复；新生成媒体及交付记录保留在项目历史，旧来源不可再采用。`)}</li>`).join('')}</ul>` : `<p class="season-empty">还没有分集。<a href="${base}?view=seasons&season=${season.id}">去添加集 →</a></p>`}
       </section>`;
     }).join('');
     const summary = storyboardList ? projectStoryboardSummary(database, projectId) : null;
@@ -89,7 +89,7 @@ export function renderCreation(database, projectId, view, query) {
   const episodeNumber = String(episodes.filter(item => item.season_id === season.id).indexOf(episode) + 1).padStart(2, '0');
   const navigation = `<nav class="episode-breadcrumb" aria-label="当前层级"><a href="${base}?view=seasons">分季／分集管理</a><span aria-hidden="true">/</span><a href="${base}?view=seasons&season=${season.id}">S${seasonNumber} · ${escapeHtml(season.name)}</a><span aria-hidden="true">/</span><span>E${episodeNumber} · ${escapeHtml(episode.name)}</span></nav>
     <nav class="episode-tabs" aria-label="本集创作页面"><a href="${episodeLink(episode)}" aria-current="${storyboard ? 'false' : 'page'}">剧本</a><a href="${base}?view=storyboards&episode=${id}" aria-current="${storyboard ? 'page' : 'false'}">分镜</a></nav>`;
-  const actions = deleteButton(`${base}/episodes/${id}/delete`, episode.name, `确定删除“${episode.name}”？该集及其剧本、分镜将删除，无法恢复。`);
+  const actions = deleteButton(`${base}/episodes/${id}/delete`, episode.name, `确定删除“${episode.name}”？该集及其剧本、分镜将删除，无法恢复；新生成媒体及交付记录保留在项目历史，旧来源不可再采用。`);
   if (storyboard) return {
     title: episode.name, description: `${season.name} · 本集分镜`, actions,
     content: `${navigation}${renderStoryboards(database, projectId, id)}`,

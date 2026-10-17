@@ -1,3 +1,6 @@
+import { generationContext } from './generation-context.js';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { request as httpRequest } from 'node:http';
 import { request as httpsRequest } from 'node:https';
 import { createGunzip, createInflate, createBrotliDecompress } from 'node:zlib';
@@ -17,6 +20,7 @@ export function imageMime(bytes) {
 export const safeModelText = (config, value) => String(value).replaceAll(config.apiKey, '[密钥已隐藏]').replaceAll(encodeURIComponent(config.apiKey), '[密钥已隐藏]');
 
 export async function callModel(config, endpoint, body, timeout = config.type === 'llm' ? null : 180000) {
+  const signal = generationContext.getStore()?.signal;
   const headers = { Authorization: `Bearer ${config.apiKey}` };
   if (!(body instanceof FormData)) {
     headers['Content-Type'] = 'application/json';
@@ -28,10 +32,11 @@ export async function callModel(config, endpoint, body, timeout = config.type ==
   try {
     if (timeout === null) {
       const url = new URL(config.baseUrl + endpoint);
+      const encoded = body instanceof FormData ? new Request(url, { method: 'POST', headers, body }) : null;
       // 原生单次连接没有 fetch 的隐式响应超时，也不会跟随重定向或重试。
       response = await new Promise((resolve, fail) => {
         request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(url, {
-          method: 'POST', headers: { ...headers, 'Accept-Encoding': 'gzip, deflate, br' }, agent: false, timeout: 0,
+          method: 'POST', headers: { ...(encoded ? Object.fromEntries(encoded.headers) : headers), 'Accept-Encoding': 'gzip, deflate, br' }, agent: false, timeout: 0, signal,
         }, incoming => {
           const encoding = incoming.headers['content-encoding'];
           const decode = decompressors.get(typeof encoding === 'string' ? encoding.trim().toLowerCase() : undefined);
@@ -41,11 +46,11 @@ export async function callModel(config, endpoint, body, timeout = config.type ==
           resolve({ status: incoming.statusCode, ok: incoming.statusCode >= 200 && incoming.statusCode < 300, body: stream });
         });
         request.on('error', fail);
-        request.end(body);
+        if (encoded) pipeline(Readable.fromWeb(encoded.body), request).catch(fail); else request.end(body);
       });
     } else {
       response = await fetch(config.baseUrl + endpoint, {
-        method: 'POST', headers, body, redirect: 'error', signal: AbortSignal.timeout(timeout),
+        method: 'POST', headers, body, redirect: 'error', signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(timeout)]) : AbortSignal.timeout(timeout),
       });
     }
     let size = 0;
@@ -79,7 +84,7 @@ export function readTextResult(result) {
 }
 
 export function readImageResult(config, result) {
-  // shortcut: 仅支持 OpenAI 同步图片结果，接入异步任务服务时再补查询协议。
+  // 此解析器只接旧同步 JSON；protocol 2 由独立有界接收器处理，不猜测协议。
   if (!Array.isArray(result?.data) || result.data.length !== 1) reject('模型接口未返回单张图片结果；异步任务或非标准响应不能当作生成成功。');
   const image = result.data[0];
   if (typeof image?.b64_json === 'string' && image.b64_json) {

@@ -15,7 +15,7 @@ function detailId(query, key, label) {
 }
 function deleteResource(url, item, kind) {
   const consequence = kind === 'looks'
-    ? '定妆资料及其全部生成图将删除，无法恢复；已关联分镜的定妆选择会失效，需重新选择或取消；不会删除基础演员、服饰或道具。'
+    ? '定妆资料和旧图片将删除，无法恢复；新生成媒体保留在项目历史供播放/交付核对，旧来源不可再采用；已关联分镜的定妆选择会失效，需重新选择或取消；不会删除基础演员、服饰或道具。'
     : '素材资料和参考图片将删除，无法恢复；已有定妆将解除这项素材关联，旧生成图保留为旧依据待核对。';
   return deleteButton(`${url}/${item.id}/delete`, item.name, `确定删除${labels[kind]}“${item.name}”（#${item.id}）？${consequence}`);
 }

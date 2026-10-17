@@ -39,7 +39,7 @@ async function saved(response, status = 201) {
 test('首页设置打开卡片列表和添加入口，无登录；类型下拉筛选四类，新建表单不混入角色板尺寸', async t => {
   const f = await fixture(t);
   assert.match(await (await f.get('/')).text(), /href="\/settings"/);
-  assert.deepEqual([...apiTypes.keys()], ['text_to_image', 'llm', 'image_to_image', 'image_edit']);
+  assert.deepEqual([...apiTypes.keys()], ['text_to_image', 'llm', 'image_to_image', 'image_edit', 'video']);
   const response = await f.get('/settings');
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('www-authenticate'), null);
@@ -104,7 +104,7 @@ test('一条真实配置一张可点击卡片，同类型可添加多条；按 I
 test('类型下拉只筛选卡片，详情按配置 ID 读取；更换类型保留本条密钥，新建不能借用同类型密钥', async t => {
   const f = await fixture(t);
   const records = [];
-  for (const [type, label] of apiTypes) records.push(await saved(await f.post('/settings/api', { ...config, type, name: label, apiKey: `${secret}-${type}` })));
+  for (const [type, label] of apiTypes) records.push(await saved(await f.post('/settings/api', { ...config, type, ...(type === 'video' ? { protocol: 'ironweave2', model: 'ironweave' } : {}), name: label, apiKey: `${secret}-${type}` })));
   await saved(await f.post('/settings/api', { ...config, name: '第二条文生图' }));
   assert.equal((await f.post('/settings/api', { ...config, apiKey: '' })).status, 400);
   for (const [type] of apiTypes) {
@@ -204,8 +204,8 @@ test('按配置 ID 和所填模型实际 POST 聊天或单图生成，返回真�
   assert.equal(urlImage.image, imageResult.url);
   assert.deepEqual(requests, [
     { method: 'POST', path: '/proxy/v1/chat/completions', authorization: `Bearer ${secret}`, body: { model: 'my-text-model', messages: [{ role: 'user', content: 'Reply only with OK.' }], max_tokens: 16, stream: false } },
-    { method: 'POST', path: '/proxy/v1/images/generations', authorization: 'Bearer second-key', body: { model: 'second-model', prompt: 'A single blue ceramic mug with a handle on a wooden table, soft natural light, realistic product photography. No text, logos, symbols, flags or people.', n: 1 } },
-    { method: 'POST', path: '/proxy/v1/images/generations', authorization: 'Bearer second-key', body: { model: 'second-model', prompt: 'A single blue ceramic mug with a handle on a wooden table, soft natural light, realistic product photography. No text, logos, symbols, flags or people.', n: 1 } },
+    { method: 'POST', path: '/proxy/v1/images/generations', authorization: 'Bearer second-key', body: { model: 'second-model', prompt: 'A single blue ceramic mug with a handle on a wooden table, soft natural light, realistic product photography. No text, logos, symbols, flags or people.', n: 1, size: '1024x1024' } },
+    { method: 'POST', path: '/proxy/v1/images/generations', authorization: 'Bearer second-key', body: { model: 'second-model', prompt: 'A single blue ceramic mug with a handle on a wooden table, soft natural light, realistic product photography. No text, logos, symbols, flags or people.', n: 1, size: '1024x1024' } },
   ]);
   assert.deepEqual(f.database.prepare('SELECT * FROM api_configs ORDER BY id').all(), original);
 });
@@ -330,14 +330,14 @@ test('配置卡片与 ID 在重启后保留，重复类型不覆盖，原角色�
     const first = await fixture(t, filename);
     first.database.exec("INSERT INTO projects VALUES (1, '原项目', '写实电影', '9:16'); INSERT INTO seasons VALUES (1, 1, '原季', 1); INSERT INTO characters (project_id, name, age) VALUES (1, '原角色', 28)");
     const records = [];
-    for (const [type, label] of apiTypes) records.push(await saved(await first.post('/settings/api', { ...config, type, name: label, model: `${type}-model` })));
+    for (const [type, label] of apiTypes) records.push(await saved(await first.post('/settings/api', { ...config, type, ...(type === 'video' ? { protocol: 'ironweave2', model: 'ironweave' } : {}), name: label, model: type === 'video' ? 'ironweave' : `${type}-model` })));
     records.push(await saved(await first.post('/settings/api', { ...config, name: '另一条文生图' })));
     await first.close();
     const second = await fixture(t, filename);
-    assert.equal(second.database.prepare('SELECT count(*) AS count FROM api_configs').get().count, 5);
+    assert.equal(second.database.prepare('SELECT count(*) AS count FROM api_configs').get().count, 6);
     assert.equal(second.database.prepare('SELECT name FROM characters').get().name, '原角色');
     const list = await (await second.get('/settings')).text();
-    assert.equal((list.match(/class="project-card api-config-card"/g) ?? []).length, 5);
+    assert.equal((list.match(/class="project-card api-config-card"/g) ?? []).length, 6);
     for (const record of records) {
       const html = await (await second.get(`/settings?config=${record.id}`)).text();
       assert.ok(!html.includes(secret));

@@ -65,7 +65,7 @@ test('15→16失败回滚完整schema／序列／旧资料，重试与重开保�
     for (const table of newTables) assert.equal(db.prepare('SELECT name FROM sqlite_master WHERE name = ?').get(table), undefined);
     assert.deepEqual(db.prepare('PRAGMA foreign_key_check').all(), []);
     db.close(); db = openDatabase(filename);
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 16);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 18);
     assert.equal(db.prepare('PRAGMA foreign_keys').get().foreign_keys, 1);
     assert.deepEqual(snapshot(db, oldTables), original);
     assert.deepEqual(snapshot(db, newTables), [[], [], [], [], []]);
@@ -74,7 +74,7 @@ test('15→16失败回滚完整schema／序列／旧资料，重试与重开保�
     lookImage(db, l, 0); lookImage(db, l, 1, 1);
     const saved = snapshot(db, newTables);
     db.close(); db = openDatabase(filename);
-    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 16);
+    assert.equal(db.prepare('PRAGMA user_version').get().user_version, 18);
     assert.deepEqual(snapshot(db, oldTables), original);
     assert.deepEqual(snapshot(db, newTables), saved);
     assert.equal(db.prepare('SELECT id FROM look_images WHERE valid = 1 AND cleared = 0').get().id, li);

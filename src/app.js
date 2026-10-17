@@ -1,3 +1,12 @@
+import { createReadStream } from 'node:fs';
+import { stat } from 'node:fs/promises';
+import { pipeline } from 'node:stream/promises';
+import { generationContext, readOperation, listOperations, recoverOperation, releaseOperation } from './generation-operations.js';
+import { linkedOperation, adoptOperation } from './media-adoption.js';
+import { mediaPath } from './media-files.js';
+import { cleanupPendingMedia } from './media-cleanup.js';
+import { generateShot, saveClip, generateClip, adoptProductionOperation } from './video-production.js';
+import { renderOperations, renderProduction } from './render-generation.js';
 import { readFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { inTransaction } from './database.js';
@@ -29,6 +38,8 @@ const resourceTypes = new Map([
 const assets = new Map();
 for (const [path, type] of [
   ['/styles.css', 'text/css'],
+  ['/generation-stream.js', 'text/javascript'],
+  ['/generation-pages.js', 'text/javascript'],
   ['/theme.js', 'text/javascript'],
   ['/projects.js', 'text/javascript'],
   ['/studio.js', 'text/javascript'],
@@ -84,7 +95,7 @@ async function renderLibrary(projects) {
           <div class="project-meta"><span>${escapeHtml(project.style)}</span><span>${escapeHtml(project.aspectRatio)}</span></div>
         </div>
       </a>
-      <div class="card-actions">${deleteButton(`/projects/${project.id}/delete`, project.name, `确定删除短剧“${project.name}”？全部季、集、角色、场景、服饰、道具、定妆及图片将一并删除，无法恢复。`)}</div>
+      <div class="card-actions">${deleteButton(`/projects/${project.id}/delete`, project.name, `确定删除短剧“${project.name}”？全部季、集、资源及旧图片将删除；所属新媒体在事务提交后清理，失败保留待办重试。未确认交付须先在历史核对。无法恢复。`)}</div>
     </article>`).join('')}</section>`;
 }
 
@@ -92,7 +103,16 @@ export function createApp(database) {
   const listProjects = database.prepare('SELECT id, name, style, aspect_ratio AS aspectRatio FROM projects ORDER BY id DESC');
   const insertProject = database.prepare('INSERT INTO projects (name, style, aspect_ratio) VALUES (?, ?, ?)');
   const findProject = database.prepare('SELECT name, style, aspect_ratio AS aspectRatio FROM projects WHERE id = ?');
-  const server = createServer(async (request, response) => {
+  const server = createServer((request, response) => {
+    const controller = new AbortController(); let streaming = false;
+    response.on('close', () => { if (!response.writableFinished) controller.abort(); });
+    const progress = event => {
+      if (!request.headers.accept?.split(',').some(type => type.trim() === 'application/x-ndjson') || response.destroyed) return;
+      if (!streaming) { streaming = true; response.writeHead(200, { 'Content-Type': 'application/x-ndjson; charset=utf-8', 'Cache-Control': 'no-store, no-transform', 'X-Content-Type-Options': 'nosniff' }); }
+      if (response.writableLength > 65536) { controller.abort(); response.destroy(); return; }
+      response.write(JSON.stringify(event) + '\n');
+    };
+    generationContext.run({ signal: controller.signal, progress }, async () => {
     function send(status, type, body, headers = {}) {
       response.writeHead(status, {
         'Content-Type': type.startsWith('image/') ? type : `${type}; charset=utf-8`,
@@ -102,7 +122,24 @@ export function createApp(database) {
       });
       response.end(request.method === 'HEAD' ? undefined : body);
     }
-    const json = (status, value) => send(status, 'application/json', JSON.stringify(value));
+    const json = (status, value) => {
+      if (streaming) { if (!response.destroyed) response.end(JSON.stringify({ type: 'result', status, result: value }) + '\n'); }
+      else send(status, 'application/json', JSON.stringify(value));
+    };
+    async function fileResponse(op) {
+      if (!['saved', 'confirmed'].includes(op.local_state)) throw Object.assign(new Error('媒体尚未完整保存。'), { status: 409 });
+      const meta = JSON.parse(op.metadata_json), filename = mediaPath(op.id), info = await stat(filename);
+      if (info.size !== meta.bytes) throw Object.assign(new Error('本地媒体长度不符。'), { status: 409 });
+      let start = 0, end = meta.bytes - 1, code = 200;
+      if (request.headers.range) {
+        const range = /^bytes=(\d+)-(\d*)$/.exec(request.headers.range);
+        if (!range || !Number.isSafeInteger(Number(range[1]))) { send(416, 'text/plain', '不支持的范围'); return; }
+        start = Number(range[1]); end = range[2] ? Math.min(Number(range[2]), end) : end;
+        if (!Number.isSafeInteger(end) || start > end) { send(416, 'text/plain', '范围无效'); return; } code = 206;
+      }
+      response.writeHead(code, { 'Content-Type': meta.mime_type, 'Content-Length': end - start + 1, 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff', 'Accept-Ranges': 'bytes', ...(code === 206 ? { 'Content-Range': `bytes ${start}-${end}/${meta.bytes}` } : {}) });
+      if (request.method === 'HEAD') response.end(); else await pipeline(createReadStream(filename, { start, end, highWaterMark: 65536 }), response);
+    }
     const path = request.url.split('?')[0];
     const deleteProjectRoute = path.match(/^\/projects\/([1-9]\d*)(?:\/(characters|scenes|props|costumes|looks|seasons|episodes)\/([1-9]\d*))?\/delete$/);
     const deleteConfigRoute = path.match(/^\/settings\/api\/([1-9]\d*)\/delete$/);
@@ -120,12 +157,46 @@ export function createApp(database) {
     const settingsRoute = path.match(/^\/settings\/api(?:\/([1-9]\d*)(\/check)?)?$/);
 
     try {
+      const operationRoute = path.match(/^(?:\/projects\/([1-9]\d*))?\/operations(?:\/([a-f0-9-]{36})\/(media|recover|release|adopt))?$/);
+      const productionMediaRoute = path.match(/^\/projects\/([1-9]\d*)\/episodes\/([1-9]\d*)\/(media|shots\/([1-9]\d*)\/generate|clips(?:\/([1-9]\d*)(\/generate)?)?)$/);
+      if (operationRoute) {
+        const projectId = operationRoute[1] ? Number(operationRoute[1]) : null, id = operationRoute[2], action = operationRoute[3];
+        if (projectId !== null && !findProject.get(projectId)) { json(404, { error: '项目不存在。' }); return; }
+        if (request.method === 'POST' && ['recover', 'release', 'adopt'].includes(action)) {
+          const form = await readForm(request); if (form.getAll('confirmed').length !== 1 || form.get('confirmed') !== 'yes') { json(400, { error: '须明确人工确认。' }); return; }
+          const row = readOperation(database, id, projectId);
+          json(200, action === 'recover' ? await recoverOperation(database, projectId, id) : action === 'release' ? releaseOperation(database, projectId, id)
+            : row.kind === 'video' || row.kind.startsWith('shot:') ? await adoptProductionOperation(database, projectId, id) : await adoptOperation(database, projectId, id)); return;
+        }
+        if (['GET', 'HEAD'].includes(request.method)) {
+          if (action === 'media') await fileResponse(readOperation(database, id, projectId));
+          else if (!action) { if (request.headers.accept === 'application/json') json(200, listOperations(database, projectId)); else send(200, 'text/html', renderOperations(database, projectId)); }
+          else json(405, { error: '此操作需要 POST。' }); return;
+        }
+      }
+      if (productionMediaRoute) {
+        const projectId = Number(productionMediaRoute[1]), episodeId = Number(productionMediaRoute[2]);
+        if (request.method === 'GET' && productionMediaRoute[3] === 'media') { send(200, 'text/html', renderProduction(database, projectId, episodeId, new URL(request.url, 'http://localhost').searchParams)); return; }
+        if (request.method === 'POST' && productionMediaRoute[3] !== 'media') {
+          const form = await readForm(request, 256 * 1024);
+          json(200, productionMediaRoute[4] ? await generateShot(database, projectId, episodeId, Number(productionMediaRoute[4]), form)
+            : productionMediaRoute[6] ? await generateClip(database, projectId, episodeId, Number(productionMediaRoute[5]), form)
+            : saveClip(database, projectId, episodeId, productionMediaRoute[5] ? Number(productionMediaRoute[5]) : null, form)); return;
+        }
+      }
       if ((deleteProjectRoute || deleteConfigRoute) && request.method === 'POST') {
         const form = await readForm(request);
         const kind = deleteConfigRoute ? 'api_configs' : deleteProjectRoute[2] ?? 'projects';
         const id = Number(deleteConfigRoute?.[1] ?? deleteProjectRoute[3] ?? deleteProjectRoute[1]);
         const projectId = deleteProjectRoute?.[2] ? Number(deleteProjectRoute[1]) : undefined;
-        json(200, deleteItem(database, kind, id, projectId, form));
+        const result = deleteItem(database, kind, id, projectId, form);
+        if (kind === 'projects') {
+          let pending = true;
+          try { pending = (await cleanupPendingMedia(database, { projectId: id, limit: 25 })).pending > 0; } catch { /* 删除事务已提交；不能将清理故障冒充项目未删除。 */ }
+          result.mediaCleanupPending = pending;
+          result.message = pending ? '项目已删除，媒体清理待重试。' : '项目已删除，所属新媒体已清理。';
+        }
+        json(200, result);
         return;
       }
       if (productionRoute && request.method === 'POST') {
@@ -264,7 +335,7 @@ export function createApp(database) {
         return;
       }
       if (path === '/settings') {
-        send(200, 'text/html', await renderSettings(database, new URL(request.url, 'http://localhost').searchParams));
+        send(200, 'text/html', (await renderSettings(database, new URL(request.url, 'http://localhost').searchParams)).replace('</body>', '<script src="/generation-stream.js"></script></body>'));
         return;
       }
       if (productionImageRoute) {
@@ -274,7 +345,8 @@ export function createApp(database) {
         const table = kind === 'looks' ? 'look_images' : 'production_asset_images', column = kind === 'looks' ? 'look_id' : 'asset_id';
         const image = database.prepare(`SELECT image, mime FROM ${table} WHERE id = ? AND ${column} = ?`).get(imageId, id);
         if (!image) { send(404, 'text/plain', '图片不存在'); return; }
-        send(200, image.mime, image.image, { 'Content-Length': image.image.length }); return;
+        const linked = linkedOperation(database, table, imageId);
+        if (linked) await fileResponse(linked); else send(200, image.mime, image.image, { 'Content-Length': image.image.length }); return;
       }
       if (boardRoute) {
         const [projectId, id, boardId] = [boardRoute[1], boardRoute[3], boardRoute[5]].map(Number);
@@ -284,7 +356,8 @@ export function createApp(database) {
         (scene ? findScene : findCharacter)(database, projectId, id);
         const board = database.prepare(`SELECT image, mime FROM ${table} WHERE id = ? AND ${scene ? 'scene_id' : 'character_id'} = ?`).get(boardId, id);
         if (!board) { send(404, 'text/plain', '角色板不存在'); return; }
-        send(200, board.mime, board.image, { 'Content-Length': board.image.length });
+        const linked = linkedOperation(database, table, boardId);
+        if (linked) await fileResponse(linked); else send(200, board.mime, board.image, { 'Content-Length': board.image.length });
         return;
       }
       const projectRoute = path.match(/^\/projects\/([1-9]\d*)$/);
@@ -320,6 +393,7 @@ export function createApp(database) {
           send(404, 'text/plain', '创作页面不存在');
           return;
         }
+        workspace.content = `<p><a href="/projects/${id}/operations">生成历史 / 恢复 / 人工采用</a>${view === 'storyboards' && /^[1-9]\d*$/.test(query.get('episode') ?? '') ? ` · <a href="/projects/${id}/episodes/${query.get('episode')}/media">镜头构图 / 视频片段</a>` : ''}</p>` + workspace.content;
         const projectTemplate = await readFile(new URL('../views/project.html', import.meta.url), 'utf8');
         const html = projectTemplate
           .replaceAll('<!-- PROJECT_NAME -->', () => escapeHtml(project.name))
@@ -334,15 +408,16 @@ export function createApp(database) {
           .replaceAll('<!-- SEASONS_CURRENT -->', view === 'seasons' ? 'page' : 'false')
           .replaceAll('<!-- CREATION_HIERARCHY -->', () => renderCreationNavigation(database, id, view, query))
           .replaceAll(/<!-- (CHARACTERS|SCENES|PROPS|COSTUMES|LOOKS)_CURRENT -->/g, (_match, type) => view === 'resources' && type.toLowerCase() === resourceType ? 'page' : 'false');
-        send(200, 'text/html', html);
+        send(200, 'text/html', html.replace('</body>', '<script src="/generation-stream.js"></script></body>'));
         return;
       }
       const asset = assets.get(path);
       send(asset ? 200 : 404, asset?.type ?? 'text/plain', asset ? await readFile(asset.file) : '页面不存在');
     } catch (error) {
       if (!error.status) console.error('处理请求失败：', error);
-      if (!response.headersSent) json(error.status ?? 500, { error: error.status ? error.message : '暂时无法完成操作，请稍后重试。', ...(error.recoveryImage ? { recoveryImage: error.recoveryImage } : {}), ...(error.recoveryText ? { recoveryText: error.recoveryText } : {}) });
+      if (!response.headersSent || streaming) json(error.status ?? 500, { error: error.status ? error.message : '暂时无法完成操作，请稍后重试。', ...(error.operationId ? { operationId: error.operationId } : {}), ...(error.recoveryImage ? { recoveryImage: error.recoveryImage } : {}), ...(error.recoveryText ? { recoveryText: error.recoveryText } : {}) });
     }
+    }).catch(() => { if (!response.destroyed) response.destroy(); });
   });
   server.on('close', () => database.close());
   return server;

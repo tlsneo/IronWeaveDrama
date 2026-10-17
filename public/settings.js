@@ -43,7 +43,7 @@ if (form) {
     imageOutput.onerror = null;
     imageOutput.removeAttribute('src');
     try {
-      const response = await fetch(url, { method: 'POST', body });
+      const response = await (!saving && window.IronGeneration ? window.IronGeneration.request : fetch)(url, { method: 'POST', body });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error ?? '操作失败，请重试。');
       if (saving) {
@@ -70,7 +70,7 @@ if (form) {
         statusElement.dataset.state = 'pending';
         statusElement.textContent = '模型请求已返回，正在加载测试图片…';
         imageOutput.onload = () => {
-          statusElement.dataset.state = 'verified';
+          statusElement.dataset.state = result.verified ? 'verified' : 'unverified';
           statusElement.textContent = result.message;
         };
         imageOutput.onerror = () => {
@@ -129,6 +129,13 @@ if (form) {
     body.set('model', document.getElementById('api-model').value);
     body.set('baseUrl', document.getElementById('api-base-url').value);
     if (needsImage) body.set('referenceImage', image);
+    if (typeSelect.value === 'video') {
+      const choice = window.prompt('请输入已保存视频参数组合的序号（从 0 开始）；本次为单文件测试，不代表实机能力已验证。');
+      if (choice === null) return;
+      const prompt = window.prompt('请输入本次视频测试的完整提示词（不会自动扩写）：');
+      if (!prompt) return;
+      body.set('profileIndex', choice); body.set('prompt', prompt);
+    }
     return submit(`/settings/api/${form.dataset.id}/check`, body, false);
   });
   window.addEventListener('beforeunload', event => {
