@@ -8,7 +8,7 @@ import { readAssetImage, productionInteger, productionText, productionReject as 
 import { readApiConfig } from './settings.js';
 import { callModel, readImageResult, safeModelText } from './model-client.js';
 import { loadImage, imageDetails } from './images.js';
-import { imageSizes } from './resource-images.js';
+import { requestedImageSize } from './resource-images.js';
 import { manualLookPrompt } from '../prompts/look/manual-look.js';
 
 export function findLook(database, projectId, id) {
@@ -95,6 +95,7 @@ export async function generateLookImage(database, projectId, id, form) {
   if (config.type !== 'image_to_image' || !config.apiKey) reject(400, '请选择已保存密钥的图生图配置；不会回退文生图。');
   if (['model', 'baseUrl'].some(key => form.getAll(key).length !== 1 || typeof form.get(key) !== 'string')) reject(400, '模型参数缺失或重复。');
   if (form.get('model') !== config.model || form.get('baseUrl') !== config.baseUrl) reject(409, 'API 配置已变化，请刷新后重新选择。');
+  const size = requestedImageSize(config, form, inputs.aspectRatio);
   return withLookLock(database, id, async () => {
     const actor = inputs.character;
     const table = actor.image.type === 'boards' ? 'character_boards' : 'character_references';
@@ -102,7 +103,7 @@ export async function generateLookImage(database, projectId, id, form) {
     const files = [{ metadata: actor.image, bytes: first?.image }, ...inputs.assets.map(asset => ({ metadata: asset.image,
       bytes: database.prepare('SELECT image FROM production_asset_images WHERE id = ? AND asset_id = ?').get(asset.image.id, asset.id)?.image }))];
     const prompt = manualLookPrompt(inputs), body = new FormData();
-    body.set('model', config.model); body.set('prompt', prompt); body.set('n', '1'); body.set('size', imageSizes[inputs.aspectRatio]);
+    body.set('model', config.model); body.set('prompt', prompt); body.set('n', '1'); body.set('size', size);
     for (const [index, file] of files.entries()) {
       let details;
       try { details = imageDetails(Buffer.from(file.bytes)); } catch { reject(400, '所选参考图不存在或已损坏，没有调用模型。'); }
@@ -113,7 +114,7 @@ export async function generateLookImage(database, projectId, id, form) {
     if (config.protocol === 'ironweave2') {
       const operation = await generateOperation(database, { projectId, kind: 'look', targetId: id, config,
         source: { revision: look.revision, inputRevision: inputs.revision, inputs, prompt, model: config.model },
-        endpoint: '/images/edits', body, expected: { size: imageSizes[inputs.aspectRatio] } });
+        endpoint: '/images/edits', body, expected: { size } });
       return { id: look.id, revision: look.revision, imageUrl: operation.mediaUrl, operation,
         message: `媒体已保存，${operation.deliveryConfirmed ? '交付已确认' : '交付确认未确定'}；请人工采用，原定妆不变。`, redirect: `/projects/${projectId}/operations` };
     }

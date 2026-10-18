@@ -145,16 +145,21 @@
     });
   }
   if (generation) {
-    const generate = get('look-generate'), clear = get('look-clear-image'), api = get('look-api');
+    const generate = get('look-generate'), clear = get('look-clear-image'), api = get('look-api'), size = get('look-image-size');
+    size.addEventListener('input', () => size.setCustomValidity(''));
     generation.addEventListener('submit', event => {
       event.preventDefault();
       if (!available(generate) || !saved()) return;
       if (generation.dataset.missing === 'true') { error.textContent = '请先补齐基础演员和所有选中素材的参考图，保存后再生成。'; return; }
       const option = api.selectedOptions[0];
       if (!api.value || !option || !option.dataset.model || !option.dataset.baseUrl) { error.textContent = '请选择有效的图生图 API 配置。'; api.focus(); return; }
+      const [width, height] = size.value.split('x').map(Number), [w, h] = size.dataset.aspectRatio.split(':').map(Number);
+      size.setCustomValidity('');
+      if (![width, height].every(Number.isSafeInteger) || width <= 0 || height <= 0 || size.value !== `${width}x${height}` || width * height > 64000000 || width * h !== height * w) size.setCustomValidity(`请填写规范正整数宽x高，最多 64,000,000 像素，须符合 ${size.dataset.aspectRatio} 比例。`);
+      if (!size.reportValidity()) return;
       return run('generate', generate, generation.dataset.url, new URLSearchParams({
         revision: generation.dataset.revision, inputRevision: generation.dataset.inputRevision,
-        apiConfigId: api.value, model: option.dataset.model, baseUrl: option.dataset.baseUrl, chargeConfirmed: 'yes',
+        apiConfigId: api.value, model: option.dataset.model, baseUrl: option.dataset.baseUrl, chargeConfirmed: 'yes', size: size.value,
       }));
     });
     clear.addEventListener('click', () => {

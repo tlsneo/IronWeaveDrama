@@ -225,6 +225,7 @@ function browser(fetch, { kind = 'look', confirm = () => true } = {}) {
   }
   if (kind === 'look') {
     node('look-generation-form', { dataset: { url: '/projects/7/looks/1/generate', revision: '5', inputRevision: 'input-hash', missing: 'false', imageId: '501' } });
+    node('look-image-size', { value: '1536x864', dataset: { aspectRatio: '16:9' }, validityMessage: '', setCustomValidity(value) { this.validityMessage = value; }, reportValidity() { return !this.validityMessage; } });
     node('look-api', { value: '21', selectedOptions: [{ dataset: { model: 'test-model', baseUrl: 'https://example.invalid/v1' } }] });
     node('look-generate', { textContent: '生成定妆图' });
     node('look-clear-image', { textContent: '清除当前图' });
@@ -359,7 +360,7 @@ test('VM 显式生成只调用一次图生图，无费用弹框；正确依据/A
   let calls = 0, finish;
   const page = browser((url, options) => {
     calls++; assert.equal(url, '/projects/7/looks/1/generate');
-    assert.deepEqual(Object.fromEntries(options.body), { revision: '5', inputRevision: 'input-hash', apiConfigId: '21', model: 'test-model', baseUrl: 'https://example.invalid/v1', chargeConfirmed: 'yes' });
+    assert.deepEqual(Object.fromEntries(options.body), { revision: '5', inputRevision: 'input-hash', apiConfigId: '21', model: 'test-model', baseUrl: 'https://example.invalid/v1', chargeConfirmed: 'yes', size: '1536x864' });
     return new Promise(resolve => { finish = resolve; });
   }, { confirm: () => { throw new Error('生成不能弹费用确认'); } });
   const pending = page.generate();
@@ -495,4 +496,14 @@ test('VM 素材上传失败保留文件和资料、解锁不重试；校验格�
   await clear.fire('production-clear-reference', 'click'); assert.equal(clear.navigation[0].guarded, false);
   const cancelled = browser(async () => { throw new Error('不应请求'); }, { kind: 'asset', confirm: () => false });
   await cancelled.fire('production-clear-reference', 'click'); assert.equal(cancelled.navigation.length, 0);
+});
+
+test('VM 定妆发送用户本次尺寸，非法值不发请求也不清除输入', async () => {
+  const calls = [], page = browser(async (_url, options) => { calls.push(options.body.get('size')); return failure({ error: 'controlled failure' }); });
+  const size = page.nodes['look-image-size'];
+  for (const value of ['', '01536x864', '1536X864', '1536x864\n', '1536 x864', '1024x1024', '16000x9000', '9007199254740992x1']) {
+    size.value = value; await page.generate(); assert.equal(calls.length, 0); assert.equal(size.value, value);
+  }
+  size.value = '1536x864'; await page.fire('look-image-size', 'input'); assert.equal(size.validityMessage, '');
+  for (const value of ['1536x864', '2560x1440']) { size.value = value; await page.generate(); assert.equal(calls.at(-1), value); assert.equal(size.value, value); }
 });

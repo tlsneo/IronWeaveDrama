@@ -11,6 +11,7 @@ function page(fetch, kind = 'character') {
     'character-generation-form': { dataset: { url: '/projects/1/characters/2/generate', revision: 'revision', boardId: '7', adult: 'true' }, addEventListener(event, handler) { events[event] = handler; } },
     'character-form': { dataset: {}, inert: false },
     'generate-character-image': { disabled: false, textContent: '生成图片', addEventListener(event, handler) { events.click = handler; } },
+    'character-image-size': { value: '1536x864', dataset: { aspectRatio: '16:9' }, addEventListener(event, handler) { events.sizeInput = handler; }, validityMessage: '', setCustomValidity(value) { this.validityMessage = value; }, reportValidity() { return !this.validityMessage; } },
     'character-image-api': { value: '3', selectedOptions: [{ dataset: { model: 'image-model', baseUrl: 'https://provider.test/v1' } }] },
     'edit-character-image': { disabled: false },
     'clear-character-image': { disabled: false, textContent: '清空图像', addEventListener(event, handler) { events.clear = handler; } },
@@ -21,7 +22,7 @@ function page(fetch, kind = 'character') {
   };
   if (kind === 'scene') { nodes['character-generation-form'].dataset.kind = 'scene'; nodes['character-generation-form'].dataset.url = '/projects/1/scenes/2/generate'; }
   runInNewContext(script, { document: { getElementById: id => kind === 'scene' ? id.includes('character') ? undefined : nodes[id.replace('scene', 'character')] : nodes[id] }, window: { confirm: () => { throw new Error('角色生成不应弹出确认窗口'); }, location: { reload() { reloads++; } }, addEventListener(event, handler) { events[event] = handler; } }, fetch, URLSearchParams, TypeError, Error });
-  return { nodes, click: () => events.click(), clear: () => events.clear(), beforeUnload: event => events.beforeunload(event), reloads: () => reloads };
+  return { nodes, inputSize: () => events.sizeInput(), click: () => events.click(), clear: () => events.clear(), beforeUnload: event => events.beforeunload(event), reloads: () => reloads };
 }
 
 test('场景使用同一生成交互，正确提交场景路径与配置／参考图快照，未保存或正在请求时不重复生图', async () => {
@@ -133,3 +134,16 @@ test('生成失败保留预览，网络失败警告不要直接重复付费；�
   assert.equal(recovery.nodes['character-board-image'].src, 'data:image/png;base64,result');
   assert.match(recovery.nodes['character-board-note'].textContent, /未能保存/);
 });
+
+for (const kind of ['character', 'scene']) {
+  test(`${kind}浏览器发送用户本次尺寸，坏值不发请求且保留输入`, async () => {
+    const calls = [], p = page(async (_url, options) => { calls.push(options.body.get('size')); return { ok: false, json: async () => ({ error: 'controlled failure' }) }; }, kind);
+    const size = p.nodes['character-image-size'];
+    for (const value of ['', '01536x864', '1536X864', '1536x864\n', '1536 x864', '1024x1024', '16000x9000', '9007199254740992x1']) {
+      size.value = value; await p.click(); assert.equal(calls.length, 0); assert.equal(size.value, value);
+    }
+    size.value = '1536x864'; p.inputSize(); assert.equal(size.validityMessage, '');
+    for (const value of ['1536x864', '2560x1440']) { size.value = value; await p.click(); assert.equal(calls.at(-1), value); assert.equal(size.value, value); }
+    if (kind === 'scene') { size.dataset.aspectRatio = '9:16'; size.value = '864x1536'; await p.click(); assert.equal(calls.at(-1), '864x1536'); }
+  });
+}

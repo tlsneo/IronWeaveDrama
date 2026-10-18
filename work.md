@@ -94,3 +94,5 @@
 
 
 2026-10-17 23:25 +0300---包内测试不能代替真实Iron/Node及业务浏览器联调---主会话重新同步最终源码到私有副本，444/444测试与全部JS语法检查通过；真实Iron Server+Node+PG/Redis/MinIO经临时回环SSH与实际Drama接通三入口、丢ACK补同回执及截断GET恢复；真实Chromium操作演员/场景/定妆/镜头构图/两镜六段视频、保存后采用、H264实际播放、Drama进程重启、旧来源重复采用拒绝以及项目删除后文件和持久待办清空，均通过。两个测试脚本初次失败分别是精确label定位及重复close数据库，已修正测试脚本后全量复跑；没有改弱产品断言---本仓55个修改文件即当前src/public/test/README/work，跨仓验证脚本在IronWeave/scripts/dev，源码未另加测试入口；按既有授权直接main本地提交，不push。未读取/迁移既有data/.env/密钥、未重启默认业务服务、未调用真实模型/GPU。撤回使用本次真实commit的git revert；Schema18/已保存媒体独立于源码回滚，不擅自降级或删除用户数据。
+
+2026-10-18 图片实际尺寸---用户要求演员／场景／定妆的实际输出尺寸来自前端本次生成参数，旧比例表固定像素不能满足，API testSize也不能替代---三个真实生成表单增加空初值可编辑必填size，共用requestedImageSize在联网与操作登记前校验单值／规范正整数／安全整数／64,000,000像素／业务比例；同值写入Iron请求与expected，protocol2缺size拒绝，legacy仅完全缺字段保留旧兼容；不改提示词、参考顺序、保存后ACK或人工采用。独立审阅未发现确定缺陷，主会话核实11文件与测试副本hash一致并实际复跑远端独占副本464/464通过，0跳过---修改src/resource-images.js、looks.js、render-characters.js、render-scene-images.js、render-production-resources.js、public/character-images.js、production-resources.js及4份test文件（含新增image-output-size.test.js），记录work.md。未读取或迁移原data/.env，未重启原业务服务，未运行GPU；真实模型页面另行验收，不以测试冒充。按既有授权main本地commit，不push；撤回使用对应git revert，数据库和媒体不随源码删除。

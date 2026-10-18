@@ -13,6 +13,16 @@ const kinds = {
   scene: { table: 'scenes', images: 'scene_images', references: 'scene_references', column: 'scene_id', label: '场景', imageLabel: '场景参考图' },
 };
 export const imageSizes = { '16:9': '2560x1440', '9:16': '1440x2560', '21:9': '2688x1152', '4:3': '2048x1536', '3:4': '1536x2048', '1:1': '2048x2048' };
+export function requestedImageSize(config, form, ratio) {
+  if (!form.has('size') && config.protocol !== 'ironweave2') return imageSizes[ratio];
+  const size = form.get('size');
+  if (form.getAll('size').length !== 1 || typeof size !== 'string' || !/^[1-9]\d*x[1-9]\d*$/.test(size)) reject(400, '请填写本次输出尺寸，格式为规范正整数宽x高，且不能重复。');
+  const [width, height] = size.split('x').map(Number);
+  if (![width, height].every(Number.isSafeInteger) || size !== `${width}x${height}` || width * height > 64000000) reject(400, '输出宽高须为安全正整数，合计不超过 64,000,000 像素。');
+  const [w, h] = ratio.split(':').map(Number);
+  if (width * h !== height * w) reject(400, `本次输出尺寸须严格符合 ${ratio} 比例，请核对后重试。`);
+  return size;
+}
 const generating = new WeakMap();
 function reject(status, message) { throw Object.assign(new Error(message), { status }); }
 function find(kind, database, projectId, id) {
@@ -80,11 +90,11 @@ export async function generateResourceImage(kind, database, projectId, id, form)
   if (config.model !== form.get('model') || config.baseUrl !== form.get('baseUrl')) reject(409, 'API 配置已变化，请刷新后重新确认生成。');
   const revision = resourceRevision(kind, item, project);
   if (revision !== form.get('revision')) reject(409, `${d.label}资料已变化，请先保存并刷新后再生成。`);
+  const ratio = kind === 'character' ? '16:9' : project.aspect_ratio;
+  const size = requestedImageSize(config, form, ratio);
   const active = generating.get(database) ?? new Set(); generating.set(database, active);
   const key = `${kind}:${id}`; assertResourceImagesIdle(kind, database, [id]); active.add(key);
   try {
-    const ratio = kind === 'character' ? '16:9' : project.aspect_ratio;
-    const size = imageSizes[ratio];
     const identity = Object.fromEntries(characterFields.filter(field => item[field.column] !== null && item[field.column] !== undefined && item[field.column] !== '').map(field => [field.label, item[field.column]]));
     const prompt = kind === 'character'
       ? `MANDATORY ART STYLE / 画风: ${project.style}\nApply the style only to rendering, line quality and surface treatment. Do not import costumes, scenery, props or dramatic lighting from style conventions.\n\nADULT CHARACTER IDENTITY / 成年角色基础外观:\n${JSON.stringify(identity, null, 2)}\n\n${(reference ? referenceCharacterBoard : baseCharacterBoard).prompt}`

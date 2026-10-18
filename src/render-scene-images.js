@@ -26,6 +26,7 @@ export function renderSceneImages(database, projectId, scene) {
           <button id="clear-scene-reference" class="theme-toggle" type="button" ${reference ? '' : 'disabled'}>移除参考图</button>
         </div></div>
       </div>
+      <div class="form-field"><label for="scene-image-size">输出尺寸（宽x高）</label><input id="scene-image-size" name="size" type="text" value="" required pattern="[1-9][0-9]*x[1-9][0-9]*" data-aspect-ratio="${escapeHtml(project.aspect_ratio)}" aria-describedby="scene-image-size-help"><p id="scene-image-size-help" class="field-help">填写本次尺寸，须严格符合 ${escapeHtml(project.aspect_ratio)} 比例和 Iron 已验证组合；不缩放、不自动选择尺寸。</p></div>
       <div class="form-field"><label for="scene-image-api">${apiName} API</label><select id="scene-image-api" name="apiConfigId" required>${configs.length !== 1 ? `<option value="">选择${apiName}配置</option>` : ''}${configs.map(config => `<option value="${config.id}" data-model="${escapeHtml(config.model)}" data-base-url="${escapeHtml(config.baseUrl)}">${escapeHtml(config.name)} · ${escapeHtml(config.model)}</option>`).join('')}</select></div>
       <div class="character-image-actions">
         <button id="generate-scene-image" class="create-button" type="button" ${configs.length ? '' : 'disabled'}>生成图片</button>

@@ -32,7 +32,7 @@ async function fixture(t, mode) {
   db.exec("INSERT INTO api_protocols(config_id,protocol) VALUES(1,'ironweave2')");
   const app = await listen(createApp(db)); t.after(app.close);
   const source = resourceRevision('scene', db.prepare('SELECT * FROM scenes WHERE id=1').get(), db.prepare('SELECT * FROM projects WHERE id=1').get());
-  const body = () => new URLSearchParams({ apiConfigId: '1', chargeConfirmed: 'yes', revision: source, model: 'ironweave', baseUrl: provider.url, referenceId: '' });
+  const body = () => new URLSearchParams({ size: '1536x864', apiConfigId: '1', chargeConfirmed: 'yes', revision: source, model: 'ironweave', baseUrl: provider.url, referenceId: '' });
   return { db, app, body, source, closed, calls: () => posts };
 }
 test('显式 NDJSON 包含操作、真实 accepted 与最终业务错误；普通 CRUD 保持 JSON', async t => {

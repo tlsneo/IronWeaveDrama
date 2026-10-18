@@ -53,6 +53,7 @@ export async function renderCharacters(database, projectId, project, query) {
               <button id="clear-character-reference" class="theme-toggle" type="button" ${reference ? '' : 'disabled'}>移除参考图</button>
             </div></div>
           </div>
+          <div class="form-field"><label for="character-image-size">输出尺寸（宽x高）</label><input id="character-image-size" name="size" type="text" value="" required pattern="[1-9][0-9]*x[1-9][0-9]*" data-aspect-ratio="16:9" aria-describedby="character-image-size-help"><p id="character-image-size-help" class="field-help">填写本次尺寸，须严格符合 16:9 比例和 Iron 已验证组合；不缩放、不自动选择尺寸。</p></div>
           <div class="form-field"><label for="character-image-api">${apiName} API</label><select id="character-image-api" name="apiConfigId" required>${configs.length !== 1 ? `<option value="">选择${apiName}配置</option>` : ''}${configs.map(config => `<option value="${config.id}" data-model="${escapeHtml(config.model)}" data-base-url="${escapeHtml(config.baseUrl)}">${escapeHtml(config.name)} · ${escapeHtml(config.model)}</option>`).join('')}</select></div>
           <div class="character-image-actions">
             <button id="generate-character-image" class="create-button" type="button" ${adult && configs.length ? '' : 'disabled'}>生成图片</button>

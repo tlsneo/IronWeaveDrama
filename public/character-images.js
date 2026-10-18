@@ -8,6 +8,8 @@
   const editButton = document.getElementById(`edit-${kind}-image`);
   const clearButton = document.getElementById(`clear-${kind}-image`);
   const api = document.getElementById(`${kind}-image-api`);
+  const size = document.getElementById(`${kind}-image-size`);
+  size.addEventListener('input', () => size.setCustomValidity(''));
   const errorElement = document.getElementById(`${kind}-generation-error`);
   const statusElement = document.getElementById(`${kind}-generation-status`);
   const boardLink = document.getElementById(`${kind}-board-link`);
@@ -33,6 +35,11 @@
     if (action !== 'clear-image') {
       body.set('referenceId', form.dataset.referenceId ?? '');
       if (!api.value) { errorElement.textContent = `请选择${form.dataset.apiName ?? '文生图'}配置。`; return; }
+      const [width, height] = size.value.split('x').map(Number), [w, h] = size.dataset.aspectRatio.split(':').map(Number);
+      size.setCustomValidity('');
+      if (![width, height].every(Number.isSafeInteger) || width <= 0 || height <= 0 || size.value !== `${width}x${height}` || width * height > 64000000 || width * h !== height * w) size.setCustomValidity(`请填写规范正整数宽x高，最多 64,000,000 像素，须符合 ${size.dataset.aspectRatio} 比例。`);
+      if (!size.reportValidity()) return;
+      body.set('size', size.value);
       const option = api.selectedOptions[0];
       body.set('apiConfigId', api.value);
       body.set('chargeConfirmed', 'yes');
