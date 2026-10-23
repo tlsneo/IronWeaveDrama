@@ -103,6 +103,7 @@ export function saveClip(db, projectId, episodeId, id, form) {
   const previous = id ? readClip(db, projectId, episodeId, id) : null;
   if (integer(form, 'revision') !== (previous?.revision ?? 0)) reject(409, '片段版本已变化。');
   const indices = json(form, 'shots'), source = clipSource(db, projectId, episodeId, indices);
+  if (form.has('sourceHash') && field(form, 'sourceHash') !== digest(source)) reject(409, '片段的镜头或素材已变化，请保留输入并刷新核对。');
   const name = field(form, 'name'); if (!name.trim() || name.length > 120) reject(400, '片段名称必填，最多 120 字。');
   const sections = Object.fromEntries(sectionNames.map(key => [key, field(form, key)]));
   if (sectionNames.some(key => sections[key].length > 24000)) reject(413, '片段文本过大。');

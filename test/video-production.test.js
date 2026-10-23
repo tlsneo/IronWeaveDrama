@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { openDatabase } from '../src/database.js';
 import { storyboardResources } from '../src/storyboards.js';
-import { sectionNames, saveClip, readClip, clipSource, clipPrompt, generateClip } from '../src/video-production.js';
+import { sectionNames, saveClip, readClip, clipSource, clipPrompt, generateClip, productionSourceDigest } from '../src/video-production.js';
 import { renderProduction } from '../src/render-generation.js';
 
 function fixture(t) {
@@ -62,4 +62,33 @@ test('保存新片段版本须撤销当前采用指针，旧视频只留历史�
   assert.equal(readClip(f.db, 1, 1, saved.id).adopted_operation_id, null);
   const history = f.db.prepare('SELECT * FROM generation_operations WHERE id=?').get(operation);
   assert.equal(history.adopted, 0); assert.equal(history.local_state, 'confirmed');
+});
+
+test('可视化制作页选择连续镜头并显示素材缩略图，JSON仅作为隐藏传输字段，读取不写入', t => {
+  const f = fixture(t);
+  f.db.exec("INSERT INTO scenes(id,project_id,name) VALUES(1,1,'房间'); INSERT INTO scene_references(scene_id,image,mime,width,height) VALUES(1,x'01','image/png',16,9); INSERT INTO episode_occurrences(episode_id,kind,scene_id,source_name,scene_heading,quote,source_start,mode,script_revision) VALUES(1,'scene',1,'房间','1-1','剧本',0,'on_screen',1)");
+  f.db.prepare('UPDATE episode_storyboards SET shots=?,resources_json=? WHERE episode_id=1').run(JSON.stringify(f.shots.map(s => ({ ...s, sceneId: 1 }))), JSON.stringify(storyboardResources(f.db, 1, 1)));
+  const before = f.db.prepare('SELECT * FROM episode_storyboards').all();
+  const html = renderProduction(f.db, 1, 1, new URLSearchParams({ start: '1', end: '2' }));
+  assert.match(html, /name="start"/); assert.match(html, /镜头 1 → 2/);
+  assert.match(html, /src="\/projects\/1\/scenes\/1\/references\/1"/);
+  for (const field of ['shots', 'pictures', 'subjects', 'sourceHash']) assert.match(html, new RegExp(`type="hidden" name="${field}"`));
+  assert.doesNotMatch(html, /textarea[^>]*name="(?:shots|pictures|subjects)"|<pre>/);
+  assert.match(html, /data-clip-picture/); assert.match(html, /data-picture-up/); assert.match(html, /data-subject-picture/);
+  assert.match(html, /production-editor.js/); assert.match(html, /theme-toggle/);
+  assert.equal(f.db.prepare('SELECT count(*) AS n FROM generation_operations').get().n, 0);
+  assert.deepEqual(f.db.prepare('SELECT * FROM episode_storyboards').all(), before);
+  for (const query of ['start=2&end=1', 'start=1&end=3', 'start=1&start=2&end=2', 'clip=1&clip=2']) assert.throws(() => renderProduction(f.db, 1, 1, new URLSearchParams(query)), { status: 400 });
+});
+
+test('新制作表单的来源快照冲突拒绝保存，不自动采纳变更后的文字或素材', t => {
+  const f = fixture(t), before = clipSource(f.db, 1, 1, [1, 2]);
+  const hash = productionSourceDigest(before);
+  const saved = saveClip(f.db, 1, 1, null, f.form({ sourceHash: hash }));
+  const row = readClip(f.db, 1, 1, saved.id);
+  f.db.exec('UPDATE episode_storyboards SET revision=2 WHERE episode_id=1');
+  assert.throws(() => saveClip(f.db, 1, 1, saved.id, f.form({ revision: '1', sourceHash: hash })), { status: 409 });
+  assert.deepEqual(readClip(f.db, 1, 1, saved.id), row);
+  const html = renderProduction(f.db, 1, 1, new URLSearchParams({ clip: String(saved.id) }));
+  assert.match(html, /片段依据已变化/); assert.match(html, /data-clip-generate[\s\S]*?<button disabled>生成视频/);
 });

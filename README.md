@@ -107,9 +107,13 @@ accepted 立即持久保存任务编号及受理快照。临时文件完整校�
 
 ### 镜头、片段与视频
 
-从本集文字分镜页面进入“镜头构图 / 视频片段”（`/projects/:id/episodes/:episodeId/media`）。先核对文字分镜，再逐镜人工填写构图提示词、明确尺寸和图片配置；实际参考图按页面所示顺序上传。片段可以包含一个或多个镜头，`shots` 数组明确顺序，保存不可变来源/素材版本快照。
+从本集文字分镜页面进入“镜头构图 / 视频片段”（`/projects/:id/episodes/:episodeId/media`）。逐镜查看定妆／演员及场景缩略图，核对构图提示词、填写尺寸并选择图片配置；生成结果在本页预览并人工采用，每镜显示最近5次结果，更多结果和交付恢复在生成历史中。
 
-六段名称和顺序严格沿用 `docs/minimax-h3-ref2va.md`：`subject_definitions`、`summary`、`retention_analysis`、`detailed_description`、`overall_soundscape`、`non_diegetic_music`。人工编辑，程序不调用 LLM 扩写。`pictures` 是实际上传数组，`<Picture N>` 按该数组从 1 编号；`subjects` 映射内容单位与真实 Picture。没有上传的 Audio/Video 标签不能假装有效。镜头切点须递增且小于 frames/fps。
+新片段通过起止镜头选择最多100个连续镜头，载入后显示动作、对白和分镜估算时长。勾选实际参考图、上下移动调整上传顺序，为主体填写英文描述并勾选一张或多张参考图，无需手填JSON。修改素材顺序或主体会要求核对Picture／Subject编号及六段引用；“将主体映射写入第一段”须明确确认，不会自动改写其他段落或调用LLM。旧素材失效时保留原选择并提示，不自动换图。
+
+片段先保存再生成，未保存修改不能直接用于视频生成。输出时长按显式帧数／帧率显示，与分镜估算分开，不自动改速、压缩对白或凑时长。结果在本页播放、核对并人工采用；旧文件和交付状态保留。保存时核对页面来源快照，冲突不覆盖。已有片段的镜头顺序不在此页改动，另一组镜头请新建片段。当前不提供全集拼接导出或自动视频提示词生成。
+
+六段名称和顺序严格沿用 `docs/minimax-h3-ref2va.md`：`subject_definitions`、`summary`、`retention_analysis`、`detailed_description`、`overall_soundscape`、`non_diegetic_music`。人工编辑，程序不调用 LLM 扩写。界面将选择序列化为实际上传数组 `pictures`，`<Picture N>` 按该数组从 1 编号；`subjects` 映射内容单位与真实 Picture。没有上传的 Audio/Video 标签不能假装有效。镜头切点须递增且小于 frames/fps。
 
 视频参数在设置中人工登记为 `[{"size":"宽x高","frames":整数,"fps":整数}]`，页面显式选择并显示 `frames / fps` 时长，不按秒取整、不改速、不套网上帧数规律。**登记参数不代表真实模型能力已验证**；Iron 仍须匹配已验证流程，否则应 422。每次只提交一个任务、一个最终视频；媒体历史可以播放、恢复和人工采用。保存新片段版本会原子撤销旧视频的当前采用标记，旧文件与确认记录保留为历史。
 

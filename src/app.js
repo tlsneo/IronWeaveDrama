@@ -40,6 +40,7 @@ for (const [path, type] of [
   ['/styles.css', 'text/css'],
   ['/generation-stream.js', 'text/javascript'],
   ['/generation-pages.js', 'text/javascript'],
+  ['/production-editor.js', 'text/javascript'],
   ['/theme.js', 'text/javascript'],
   ['/projects.js', 'text/javascript'],
   ['/studio.js', 'text/javascript'],
