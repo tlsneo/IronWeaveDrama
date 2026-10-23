@@ -38,6 +38,7 @@ async function fixture(t, kind, reference = false) {
       acknowledgements++; const receipt = JSON.parse(Buffer.concat(chunks));
       const row = db.prepare('SELECT * FROM generation_operations WHERE task_id=?').get(req.url.split('/').at(-2));
       assert.equal(row.local_state, 'saved'); assert.deepEqual(await readFile(mediaPath(row.id)), output);
+      if (control.ackRejected) { res.writeHead(422, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: { code: 'receipt_mismatch', message: 'synthetic mismatch' } })); return; }
       res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ task_id: row.task_id, state: 'succeeded', ...receipt })); return;
     }
     const multipart = req.headers['content-type'].startsWith('multipart/form-data');
@@ -53,7 +54,7 @@ async function fixture(t, kind, reference = false) {
     res.write(`--${boundary}\r\nContent-Type: image/png\r\nContent-Length: ${output.length}\r\n\r\n`); res.write(output); res.write('\r\n'); event('output_end', 3, meta); res.end(`--${boundary}--\r\n`);
   });
   await new Promise(resolve => provider.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => provider.close(resolve)));
-  const baseUrl = `http://127.0.0.1:${provider.address().port}`;
+  const baseUrl = `http://127.0.0.1:${provider.address().port}/v1`;
   db.prepare("INSERT INTO api_configs(id,name,type,base_url,api_key,model) VALUES(1,'合成',?,?,'synthetic-key','ironweave')").run(reference || kind === 'look' ? 'image_to_image' : 'text_to_image', baseUrl);
   db.exec("INSERT INTO api_protocols(config_id,protocol,test_size) VALUES(1,'ironweave2','1024x1024')");
   if (reference || kind === 'look') db.prepare(`INSERT INTO ${kind === 'scene' ? 'scene_references(scene_id' : 'character_references(character_id'},image,mime,width,height) VALUES(1,?,'image/png',16,9)`).run(references[0]);
@@ -75,7 +76,7 @@ const decoding = { skip: !(process.env.IRONWEAVE_FFMPEG && process.env.IRONWEAVE
 for (const [kind, reference] of [['character',false],['character',true],['scene',false],['scene',true],['look',false]]) {
   test(`protocol2 ${kind}/${reference ? 'reference' : 'text-or-look'} 使用本次1536x864（testSize=1024x1024不影响），请求与expected一致，CPU解码保存确认且不自动采用`, decoding, async t => {
     const f = await fixture(t, kind, reference), result = await f.generate();
-    assert.equal(f.calls.length, 1); assert.equal(f.calls[0].size, '1536x864'); assert.equal(f.calls[0].path, reference || kind === 'look' ? '/images/edits' : '/images/generations');
+    assert.equal(f.calls.length, 1); assert.equal(f.calls[0].size, '1536x864'); assert.equal(f.calls[0].path, reference || kind === 'look' ? '/v1/images/edits' : '/v1/images/generations');
     assert.deepEqual(f.calls[0].files, kind === 'look' ? references : reference ? [references[0]] : []);
     assert.equal(f.calls[0].single, reference); assert.equal(f.acknowledgements(), 1);
     assert.equal(result.operation.deliveryConfirmed, true); assert.equal(result.operation.adopted, false);
@@ -94,16 +95,14 @@ for (const kind of ['character','scene','look']) {
     if (kind === 'scene') { f.db.exec("UPDATE projects SET aspect_ratio='1:1'"); await assert.rejects(f.generate(null), { status: 400 }); }
     assert.equal(f.calls.length, 0); assert.equal(f.db.prepare('SELECT count(*) AS n FROM generation_operations').get().n, 0);
   });
-  test(`legacy ${kind} 旧调用缺size仍用2560x1440，显式size原样传，不走新交付`, async t => {
+  test(`旧legacy标签 ${kind} 也必须显式size，单JSON图片响应拒绝且不产生BLOB`, async t => {
     const f = await fixture(t, kind); f.control.legacy = true;
     f.db.exec("UPDATE api_protocols SET protocol='legacy',test_size='1536x864'");
-    await f.generate(null); assert.equal(f.calls[0].size, '2560x1440');
-    await f.generate('1536x864'); assert.equal(f.calls[1].size, '1536x864');
-    await f.generate('2560x1440'); assert.equal(f.calls[2].size, '2560x1440');
-    await assert.rejects(f.generate('1024x1024'), { status: 400 });
-    await assert.rejects(f.generate(''), { status: 400 });
-    await assert.rejects(f.generate('1536x864', true), { status: 400 });
-    assert.equal(f.calls.length, 3); assert.equal(f.acknowledgements(), 0);
+    await assert.rejects(f.generate(null), { status: 400 });
+    assert.equal(f.calls.length, 0);
+    await assert.rejects(f.generate('1536x864'), { status: 502 });
+    assert.equal(f.calls.length, 1); assert.equal(f.acknowledgements(), 0);
+    assert.equal(f.db.prepare(`SELECT count(*) AS n FROM ${kind === 'character' ? 'character_boards' : kind === 'scene' ? 'scene_images' : 'look_images'}`).get().n, 0);
   });
 }
 test('protocol2 请求1536x864不能接受旧2560x1440响应元数据，不保存不ACK', async t => {
@@ -147,3 +146,14 @@ test('尺寸边界包含64,000,000像素，非法类型、空白、非安全整�
   assert.throws(() => requestedImageSize(config, file, '16:9'), { status: 400 });
   for (const [ratio, size] of [['9:16','864x1536'],['21:9','2688x1152'],['4:3','2048x1536'],['3:4','1536x2048'],['1:1','1024x1024']]) assert.equal(requestedImageSize(config, new URLSearchParams({ size }), ratio), size);
 });
+
+for (const kind of ['character', 'scene', 'look']) {
+  test(`${kind} 已保存但ACK明确拒绝时保留真实拒绝说明，不误称确认未知或自动采用`, decoding, async t => {
+    const f = await fixture(t, kind); f.control.ackRejected = true;
+    const result = await f.generate();
+    assert.equal(result.operation.localState, 'saved'); assert.equal(result.operation.deliveryConfirmed, false);
+    assert.match(result.message, /交付确认已拒绝.*receipt_mismatch/); assert.doesNotMatch(result.message, /未确定/);
+    assert.equal(f.calls.length, 1); assert.equal(f.acknowledgements(), 1);
+    assert.equal(f.db.prepare(`SELECT count(*) AS n FROM ${kind === 'character' ? 'character_boards' : kind === 'scene' ? 'scene_images' : 'look_images'}`).get().n, 0);
+  });
+}

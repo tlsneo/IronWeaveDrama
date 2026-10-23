@@ -53,7 +53,7 @@ test('真实 ffmpeg 合成图片/视频完整解码验收，错误帧数与截�
     await validateMediaFile(file, meta);
     const ready = new Date().toISOString();
     current = { file, task: randomUUID(), meta: { ...meta, delivery_ready_at: ready, delivery_expires_at: new Date(Date.parse(ready) + 1800000).toISOString(), delivery_timeout_ms: 1800000 } };
-    const configId = Number(db.prepare('INSERT INTO api_configs(name,type,base_url,api_key,model) VALUES(?,?,?,?,?)').run('CPU 合成', extra.frames ? 'video' : 'text_to_image', `http://127.0.0.1:${server.address().port}`, 'synthetic-key', 'ironweave').lastInsertRowid);
+    const configId = Number(db.prepare('INSERT INTO api_configs(name,type,base_url,api_key,model) VALUES(?,?,?,?,?)').run('CPU 合成', extra.frames ? 'video' : 'text_to_image', `http://127.0.0.1:${server.address().port}/v1`, 'synthetic-key', 'ironweave').lastInsertRowid);
     db.prepare("INSERT INTO api_protocols(config_id,protocol) VALUES(?,'ironweave2')").run(configId);
     const expected = { size: '16x16', ...(extra.frames ? { frames: extra.frames, fps: extra.fps } : {}) };
     const operation = await generateOperation(db, { projectId: null, kind: 'test', targetId: configId, config: readApiConfig(db, configId), source: { cpuFixture: true }, endpoint: extra.frames ? '/videos/generations' : '/images/generations', expected, body: { model: 'ironweave', prompt: 'CPU fixture only', ...expected } }, { directory });

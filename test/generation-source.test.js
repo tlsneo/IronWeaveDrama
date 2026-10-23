@@ -60,7 +60,7 @@ test('B: 所有五类来源初始有效，list/渲染只读且不伪造交付确
   const before = f.db.prepare('SELECT total_changes() AS n').get().n;
   const list = listOperations(f.db, 1); assert.equal(list.length, 5);
   assert.ok(list.every(op => op.sourceStatus.state === 'current' && !op.deliveryConfirmed));
-  const html = renderOperations(f.db, 1); assert.match(html, /来源状态：当前有效/); assert.match(html, /交付确认未确定/);
+  const html = renderOperations(f.db, 1); assert.match(html, /来源状态：当前有效/); assert.match(html, /交付尚未确认/);
   assert.doesNotMatch(html, /disabled aria-disabled/);
   assert.equal(f.db.prepare('SELECT total_changes() AS n').get().n, before);
 });

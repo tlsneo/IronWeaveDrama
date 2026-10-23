@@ -78,22 +78,37 @@ async function smallBody(response) {
   try { return strictJson(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks))); }
   catch { protocolError('接口没有返回有效 JSON。'); }
 }
-async function requireOk(response) {
-  if (response.statusCode === 200) {
-    const seen = new Set();
-    for (let i = 0; i < (response.rawHeaders?.length ?? 0); i += 2) {
-      const key = response.rawHeaders[i].toLowerCase();
-      if (['content-type', 'content-length', 'content-encoding', 'x-ironweave-protocol', 'x-ironweave-task-id', 'x-ironweave-sha256', 'x-ironweave-delivery-expires-at', 'accept-ranges'].includes(key)) {
-        check(!seen.has(key), '响应协议头重复。'); seen.add(key);
-      }
+// 只有本入口的已知状态/错误码及完整错误 JSON 才能证明拒绝；代理错误不能解除提交防重。
+const generationRefusals = {
+  400: 'invalid_request invalid_parameters invalid_seed invalid_size invalid_video_parameters unknown_field invalid_integer invalid_input_slots invalid_media invalid_body invalid_multipart invalid_utf8 duplicate_field invalid_workflow unverified_resource_profile invalid_output_spec invalid_video_capability invalid_runtime invalid_model invalid_resource invalid_argument_template workflow_identity_mismatch runtime_revision_mismatch invalid_revision workflow_envelope_mismatch invalid_final_artifact plan_too_large',
+  401: 'unauthorized', 404: 'workflow_not_found endpoint_not_found', 406: 'not_acceptable', 408: 'upload_idle_timeout',
+  409: 'workflow_unavailable', 413: 'request_too_large images_too_large too_many_inputs decoded_image_too_large',
+  415: 'unsupported_content_type unsupported_media media_type_mismatch',
+  422: 'unsupported_capability invalid_media animated_image audio_decode_limit dependency_revision_unavailable runtime_not_verified runtime_template_mismatch model_not_verified model_revision_mismatch invalid_workflow_contract input_capacity_not_verified',
+};
+const ackRefusals = { 400: 'invalid_ack', 401: 'unauthorized', 404: 'task_not_found', 409: 'ack_not_ready receipt_conflict task_not_acknowledgeable', 410: 'delivery_expired', 422: 'receipt_mismatch' };
+const outputRefusals = { 400: 'range_not_supported', 401: 'unauthorized', 404: 'task_not_found', 406: 'not_acceptable', 409: 'output_not_ready', 410: 'delivery_expired output_unavailable' };
+async function requireOk(response, refusals) {
+  const seen = new Set();
+  for (let i = 0; i < (response.rawHeaders?.length ?? 0); i += 2) {
+    const key = response.rawHeaders[i].toLowerCase();
+    if (['content-type', 'content-length', 'content-encoding', 'x-ironweave-protocol', 'x-ironweave-task-id', 'x-ironweave-sha256', 'x-ironweave-delivery-expires-at', 'accept-ranges'].includes(key)) {
+      check(!seen.has(key), '响应协议头重复。'); seen.add(key);
     }
-    return;
   }
+  if (response.statusCode === 200) return;
   const status = response.statusCode;
-  let code = 'request_failed';
-  try { const value = await smallBody(response); if (/^[a-z_]{1,80}$/.test(value?.error?.code)) code = value.error.code; }
+  let code = 'request_failed', upstreamRejected = false;
+  try {
+    check(/^application\/json(?:;\s*charset=utf-8)?$/i.test(response.headers['content-type']) && !response.headers['content-encoding'], '错误响应必须是未压缩 JSON。');
+    check(!response.headers['x-ironweave-protocol'] || response.headers['x-ironweave-protocol'] === '2', '错误响应协议不匹配。');
+    const value = await smallBody(response);
+    check(value && !Array.isArray(value) && value.error && !Array.isArray(value.error) && typeof value.error.message === 'string' && value.error.message.length > 0, '错误响应格式无效。');
+    upstreamRejected = refusals[status]?.split(' ').includes(value.error.code) === true;
+    if (upstreamRejected || (status === 503 && ['commit_unavailable', 'output_temporarily_unavailable'].includes(value.error.code))) code = value.error.code;
+  } catch { /* 正文不完整或非协议错误不能证明未受理/确认被拒绝。 */ }
   finally { response.destroy(); }
-  throw Object.assign(new Error(`IronWeave HTTP ${status}：${code}；未自动重新生成。`), { status: 502, upstreamStatus: status, code });
+  throw Object.assign(new Error(`IronWeave HTTP ${status}：${code}；未自动重新生成。`), { status: 502, upstreamStatus: status, code, upstreamRejected });
 }
 
 export class BoundedReader {
@@ -143,7 +158,7 @@ function eventValidator() {
 
 export async function receiveMixed(response, { sink, onEvent = async () => {}, expected } = {}) {
   try {
-    await requireOk(response);
+    await requireOk(response, generationRefusals);
     check(response.headers['x-ironweave-protocol'] === '2' && !response.headers['content-encoding'] && !response.headers['content-length'], '未协商 protocol 2 或响应被压缩/整段定长。');
     const match = /^multipart\/mixed;\s*boundary=(iw_[a-f0-9]{32})$/.exec(response.headers['content-type']); check(match, 'MIME 边界格式无效。');
     const boundary = match[1], reader = new BoundedReader(response), validateEvent = eventValidator();
@@ -194,7 +209,7 @@ export async function fetchOutput(config, taskId, meta, { sink, signal, expected
   if (meta) { receipt(meta); windowFields(meta); }
   const res = await ironRequest(config, `/tasks/${taskId}/output`, { method: 'GET', signal, accept: meta?.mime_type || '*/*' });
   try {
-    await requireOk(res);
+    await requireOk(res, outputRefusals);
     const h = res.headers;
     check(h['x-ironweave-protocol'] === '2' && h['x-ironweave-task-id'] === taskId && h['accept-ranges'] === 'none' && !h['content-encoding'], '整文件重取协议或任务身份不符。');
     check(/^[1-9]\d*$/.test(h['content-length']), '重取必须声明精确长度。');
@@ -216,6 +231,6 @@ export async function fetchOutput(config, taskId, meta, { sink, signal, expected
 export async function acknowledge(config, taskId, meta, { signal } = {}) {
   check(uuid.test(taskId), '任务编号无效。'); const fixed = receipt(meta);
   const res = await ironRequest(config, `/tasks/${taskId}/ack`, { body: fixed, accept: 'application/json', signal });
-  try { await requireOk(res); check(/^application\/json(?:;\s*charset=utf-8)?$/i.test(res.headers['content-type']) && !res.headers['content-encoding'], 'ACK 必须返回未压缩 JSON 正文。'); const value = await smallBody(res); check(value.task_id === taskId && value.state === 'succeeded' && value.bytes === fixed.bytes && value.sha256 === fixed.sha256, 'ACK 200 正文与保存回执不匹配。'); return value; }
+  try { await requireOk(res, ackRefusals); check(/^application\/json(?:;\s*charset=utf-8)?$/i.test(res.headers['content-type']) && !res.headers['content-encoding'], 'ACK 必须返回未压缩 JSON 正文。'); const value = await smallBody(res); check(value.task_id === taskId && value.state === 'succeeded' && value.bytes === fixed.bytes && value.sha256 === fixed.sha256, 'ACK 200 正文与保存回执不匹配。'); return value; }
   finally { res.destroy(); }
 }

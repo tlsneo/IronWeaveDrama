@@ -3,7 +3,7 @@ import { randomUUID, createHash } from 'node:crypto';
 import { generationContext } from './generation-context.js';
 export { generationContext } from './generation-context.js';
 import { inTransaction } from './database.js';
-import { readApiConfig } from './settings.js';
+import { readApiConfig, requireWeaveConfig } from './settings.js';
 import { ironRequest, receiveMixed, fetchOutput, acknowledge } from './ironweave-client.js';
 import { mediaPath, createMediaFile, publishMedia, syncPublishedMedia, verifyFile, validateMediaFile, mediaDirectory } from './media-files.js';
 
@@ -43,12 +43,15 @@ async function confirm(db, row, config, signal) {
     const ack = await acknowledge(config, row.task_id, JSON.parse(row.metadata_json), { signal });
     inTransaction(db, () => update(db, row.id, { ack_json: JSON.stringify(ack), task_state: 'succeeded', local_state: 'confirmed', active: 0, error: '' }));
   } catch (error) {
-    update(db, row.id, { ...(error.code === 'delivery_expired' ? { task_state: 'failed' } : {}), error: `媒体已保存，交付确认未确定${error.code ? `（${error.code}）` : ''}；只核对同一回执。`, active: 0 });
+    const message = error.upstreamRejected
+      ? `媒体已保存，交付确认已拒绝（HTTP ${error.upstreamStatus}：${error.code}）；保留文件及回执，只核对同一回执，不自动重新生成。`
+      : `媒体已保存，交付确认未确定${error.code ? `（${error.code}）` : ''}；只核对同一回执。`;
+    update(db, row.id, { ...(error.upstreamRejected && error.code === 'delivery_expired' ? { task_state: 'failed' } : {}), error: message, active: 0 });
   }
   return publicOperation(readOperation(db, row.id, row.project_id));
 }
 export async function generateOperation(db, { projectId, kind, targetId, config, source, endpoint, body, expected }, options = {}) {
-  if (config.protocol !== 'ironweave2') reject(400, '此入口必须显式选择 IronWeave protocol 2。');
+  requireWeaveConfig(config);
   const id = randomUUID();
   try {
     inTransaction(db, () => {
@@ -87,7 +90,9 @@ export async function generateOperation(db, { projectId, kind, targetId, config,
     } catch (error) {
       if (file) await file.file.close().catch(() => {});
       const row = readOperation(db, id, projectId);
-      update(db, id, { local_state: 'interrupted', active: ['failed', 'cancelled'].includes(row.task_state) ? 0 : 1,
+      if (!row.task_id && error.upstreamRejected) {
+        update(db, id, { local_state: 'rejected', active: 0, error: `生成请求未受理（HTTP ${error.upstreamStatus}：${error.code}）；未自动重新生成，可修改后手动发起新请求。` });
+      } else update(db, id, { local_state: 'interrupted', active: ['failed', 'cancelled'].includes(row.task_state) ? 0 : 1,
         error: row.task_id ? `接收或持久化中断，请恢复同一操作；未自动重新生成。${error.status === 503 ? ' 请检查可配置媒体解码工具和存储状态。' : ''}` : '提交结果未知，禁止自动再次 POST；请先核对服务端记录。' });
       throw Object.assign(new Error(readOperation(db, id, projectId).error), { status: error.status ?? 502, operationId: id });
     }
@@ -97,6 +102,7 @@ export async function recoverOperation(db, projectId, id, options = {}) {
   return withRunning(db, id, async () => {
     let row = readOperation(db, id, projectId);
     if (row.local_state === 'confirmed') return publicOperation(row);
+    if (row.local_state === 'rejected') reject(409, row.error);
     if (!row.task_id) reject(409, '尚无持久关联的任务编号，不能猜任务或再次推理；请核对服务端记录。');
     generationContext.getStore()?.progress?.({ type: 'operation', operationId: id });
     const config = configFor(db, row), expected = JSON.parse(row.request_json).expected;
@@ -119,7 +125,6 @@ export async function recoverOperation(db, projectId, id, options = {}) {
         if (complete) {
           const { open } = await import('node:fs/promises'); await publishMedia(id, await open(part, 'r+'), directory);
         } else {
-          if (meta && Date.parse(meta.delivery_expires_at) <= Date.now()) reject(410, '交付窗口已过，缺少完整本地文件；不会重新推理。');
           file = await createMediaFile(id, directory);
           meta = await fetchOutput(config, row.task_id, meta, { sink: file.sink, signal, expected, onMetadata: async value => update(db, id, { metadata_json: JSON.stringify(value), task_state: 'delivering' }) });
           await file.file.sync(); await validate(file.filename, meta); await publishMedia(id, file.file, directory); file = null;
@@ -127,6 +132,10 @@ export async function recoverOperation(db, projectId, id, options = {}) {
       }
       inTransaction(db, () => update(db, id, { metadata_json: JSON.stringify(meta), local_state: 'saved', active: 0, error: '' }));
       row = readOperation(db, id, projectId); return await confirm(db, row, config, signal);
+    } catch (error) {
+      if (error.upstreamStatus) update(db, id, { error: error.message,
+        ...(error.upstreamRejected && error.code === 'delivery_expired' ? { task_state: 'failed', active: 0 } : {}) });
+      throw error;
     } finally { if (file) await file.file.close().catch(() => {}); }
   });
 }

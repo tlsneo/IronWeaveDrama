@@ -5,7 +5,6 @@
   const imageLabel = kind === 'scene' ? '场景参考图' : '角色板';
   const characterForm = document.getElementById(`${kind}-form`);
   const button = document.getElementById(`generate-${kind}-image`);
-  const editButton = document.getElementById(`edit-${kind}-image`);
   const clearButton = document.getElementById(`clear-${kind}-image`);
   const api = document.getElementById(`${kind}-image-api`);
   const size = document.getElementById(`${kind}-image-size`);
@@ -60,7 +59,6 @@
         if (result.recoveryImage) {
           showImage(result.recoveryImage, `图片已生成但未能保存。请点击上方图片打开并另存，原${imageLabel}不变。`);
           form.dataset.boardId = '';
-          editButton.disabled = true;
           clearButton.disabled = true;
         }
         throw new Error(result.error ?? '图片操作失败。');
@@ -73,7 +71,6 @@
       } else {
         showImage(result.imageUrl, result.message);
         form.dataset.boardId = result.imageUrl.split('/').pop();
-        editButton.disabled = false;
         clearButton.disabled = false;
       }
     } catch (error) {

@@ -6,8 +6,7 @@ import { findCharacter, characterFields } from './characters.js';
 import { assertLooksIdle, withLookLock } from './look-locks.js';
 import { readAssetImage, productionInteger, productionText, productionReject as reject } from './production-assets.js';
 import { readApiConfig } from './settings.js';
-import { callModel, readImageResult, safeModelText } from './model-client.js';
-import { loadImage, imageDetails } from './images.js';
+import { imageDetails } from './images.js';
 import { requestedImageSize } from './resource-images.js';
 import { manualLookPrompt } from '../prompts/look/manual-look.js';
 
@@ -111,38 +110,11 @@ export async function generateLookImage(database, projectId, id, form) {
       // 固定多图协议；即使只选演员也使用image[]，不换字段重试或忽略素材。
       body.append('image[]', new Blob([file.bytes], { type: details.mime }), `reference-${index + 1}.${details.mime === 'image/jpeg' ? 'jpg' : details.mime.split('/')[1]}`);
     }
-    if (config.protocol === 'ironweave2') {
-      const operation = await generateOperation(database, { projectId, kind: 'look', targetId: id, config,
-        source: { revision: look.revision, inputRevision: inputs.revision, inputs, prompt, model: config.model },
-        endpoint: '/images/edits', body, expected: { size } });
-      return { id: look.id, revision: look.revision, imageUrl: operation.mediaUrl, operation,
-        message: `媒体已保存，${operation.deliveryConfirmed ? '交付已确认' : '交付确认未确定'}；请人工采用，原定妆不变。`, redirect: `/projects/${projectId}/operations` };
-    }
-    let bytes, details;
-    try {
-      const response = await callModel(config, '/images/edits', body);
-      bytes = await loadImage(readImageResult(config, response), config.baseUrl);
-      details = imageDetails(bytes);
-    } catch (error) { reject(error.status ?? 502, safeModelText(config, error.message).replaceAll('原角色板', '原定妆照')); }
-    const [w, h] = inputs.aspectRatio.split(':').map(Number);
-    let imageId, revision, unchanged, valid;
-    try {
-      inTransaction(database, () => {
-        const current = findLook(database, projectId, id);
-        unchanged = current.revision === look.revision && lookInputs(database, projectId, current).revision === inputs.revision;
-        valid = unchanged && details.width * h === details.height * w;
-        imageId = Number(database.prepare('INSERT INTO look_images (look_id, image, mime, width, height, valid, revision, model, prompt, inputs_json) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').run(id, bytes, details.mime, details.width, details.height, Number(valid), inputs.revision, config.model, prompt, JSON.stringify({ ...inputs, apiConfigId: config.id, model: config.model, baseUrl: config.baseUrl })).lastInsertRowid);
-        revision = current.revision + 1;
-        database.prepare('UPDATE looks SET revision = ? WHERE id = ?').run(revision, id);
-      });
-    } catch {
-      reject(502, '定妆照已生成但未能保存，原图不变；请下载本次图片，避免丢失付费结果。没有自动重试。', { recoveryImage: `data:${details.mime};base64,${bytes.toString('base64')}` });
-    }
-    const imageUrl = `/projects/${projectId}/looks/${id}/images/${imageId}`;
-    if (!valid) reject(unchanged ? 502 : 409, unchanged
-      ? `接口返回 ${details.width} × ${details.height}，不符合定妆四视图 ${inputs.aspectRatio}；本次图片保留供查看，未替换原定妆照，没有自动重试。`
-      : '生成期间演员、素材或风格已变化，本次图片保留供查看，未替换原定妆照，没有自动重试。', { recoveryImage: imageUrl });
-    return { id: imageId, revision, imageUrl, message: '定妆照已生成保存，请核对人物身份、服饰与道具。', redirect: `/projects/${projectId}?resource=looks&look=${id}` };
+    const operation = await generateOperation(database, { projectId, kind: 'look', targetId: id, config,
+      source: { revision: look.revision, inputRevision: inputs.revision, inputs, prompt, model: config.model },
+      endpoint: '/images/edits', body, expected: { size } });
+    return { id: look.id, revision: look.revision, imageUrl: operation.mediaUrl, operation,
+      message: `${operation.error || (operation.deliveryConfirmed ? '媒体已保存，交付已确认。' : '媒体已保存，交付确认未确定。')}请人工采用，原定妆不变。`, redirect: `/projects/${projectId}/operations` };
   });
 }
 export function clearLookImage(database, projectId, id, form) {

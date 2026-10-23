@@ -1,6 +1,5 @@
 import { escapeHtml } from './html.js';
 import { readSceneReference, sceneRevision, sceneImageUrl } from './scene-images.js';
-import { renderImageDialog } from './render-image-dialog.js';
 
 export function renderSceneImages(database, projectId, scene) {
   const project = database.prepare('SELECT style, aspect_ratio FROM projects WHERE id = ?').get(projectId);
@@ -10,7 +9,6 @@ export function renderSceneImages(database, projectId, scene) {
   const reference = readSceneReference(database, scene.id);
   const type = reference ? 'image_to_image' : 'text_to_image'; const apiName = reference ? '图生图' : '文生图';
   const configs = database.prepare('SELECT id, name, model, base_url AS baseUrl FROM api_configs WHERE type = ? ORDER BY id').all(type);
-  const editConfigs = database.prepare("SELECT id, name, model FROM api_configs WHERE type = 'image_edit' ORDER BY id").all();
   const base = `/projects/${projectId}/scenes/${scene.id}`;
   return { preview: `<aside class="character-preview" aria-label="场景参考图预览">
     <div class="character-preview-heading"><h3>场景参考图</h3><span>${escapeHtml(project.aspect_ratio)}</span></div>
@@ -30,13 +28,13 @@ export function renderSceneImages(database, projectId, scene) {
       <div class="form-field"><label for="scene-image-api">${apiName} API</label><select id="scene-image-api" name="apiConfigId" required>${configs.length !== 1 ? `<option value="">选择${apiName}配置</option>` : ''}${configs.map(config => `<option value="${config.id}" data-model="${escapeHtml(config.model)}" data-base-url="${escapeHtml(config.baseUrl)}">${escapeHtml(config.name)} · ${escapeHtml(config.model)}</option>`).join('')}</select></div>
       <div class="character-image-actions">
         <button id="generate-scene-image" class="create-button" type="button" ${configs.length ? '' : 'disabled'}>生成图片</button>
-        <button id="edit-scene-image" class="theme-toggle" type="button" aria-controls="scene-image-edit-dialog" aria-haspopup="dialog" ${latest ? '' : 'disabled'}>AI修图</button>
         <button id="clear-scene-image" class="theme-toggle" type="button" ${latest ? '' : 'disabled'}>清空图像</button>
       </div>
       ${!configs.length ? `<p class="field-help">尚无${apiName}配置，请先到<a href="/settings?type=${type}">设置</a>添加。</p>` : ''}
       <p class="field-help">生成无人环境参考图，沿用项目画风和比例；点击生成才调用模型，可能计费。上传／移除参考图不会调用模型。</p>
+      <p class="field-help">Weave 不支持遮罩修图；历史图片仍可查看和采用。</p>
       <p id="scene-generation-error" class="form-error" role="alert"></p>
       <p id="scene-generation-status" class="field-help" role="status" aria-live="polite">${image && (image.revision !== revision || image.reference_id !== (reference?.id ?? null)) ? '现有图片对应旧资料或参考图；修改后不会自动重新生成。' : ''}</p>
     </form>
-  </aside>`, dialog: renderImageDialog(editConfigs, 'scene') };
+  </aside>`, dialog: '' };
 }

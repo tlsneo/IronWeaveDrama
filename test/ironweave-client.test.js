@@ -57,7 +57,7 @@ test('64 MiB 视频按 64 KiB 增量接收，不按整文件 Buffer 分配', asy
 test('原生 multipart 正确保留 image[] 顺序；ACK 丢失后核对同回执且不本地按期限拒绝', async t => {
   let calls = 0, form, ackType = 'application/json'; const fixed = meta();
   const server = createServer(async (req, res) => {
-    if (req.url === '/images/edits') {
+    if (req.url === '/v1/images/edits') {
       form = await new Request('http://127.0.0.1', { method: 'POST', headers: req.headers, body: Readable.toWeb(req), duplex: 'half' }).formData(); res.writeHead(200); res.end('{}'); return;
     }
     calls++; const chunks = []; for await (const chunk of req) chunks.push(chunk);
@@ -65,7 +65,7 @@ test('原生 multipart 正确保留 image[] 顺序；ACK 丢失后核对同回�
     if (calls === 1) { res.destroy(); return; }
     res.setHeader('Content-Type', ackType); res.end(JSON.stringify({ task_id: task, state: 'succeeded', bytes: fixed.bytes, sha256: fixed.sha256 }));
   }); await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)));
-  const config = { baseUrl: `http://127.0.0.1:${server.address().port}`, apiKey: 'synthetic-key' }, body = new FormData(); body.set('prompt', '原文'); body.append('image[]', new Blob(['actor']), 'actor.png'); body.append('image[]', new Blob(['costume']), 'costume.png');
+  const config = { baseUrl: `http://127.0.0.1:${server.address().port}/v1`, apiKey: 'synthetic-key' }, body = new FormData(); body.set('prompt', '原文'); body.append('image[]', new Blob(['actor']), 'actor.png'); body.append('image[]', new Blob(['costume']), 'costume.png');
   const res = await ironRequest(config, '/images/edits', { body }); for await (const _ of res) {};
   assert.deepEqual(await Promise.all(form.getAll('image[]').map(file => file.text())), ['actor', 'costume']); assert.equal(form.get('prompt'), '原文');
   await assert.rejects(acknowledge(config, task, fixed)); fixed.delivery_expires_at = '2000-01-01T00:00:00.000Z';
@@ -78,9 +78,61 @@ test('整文件 GET 校验任务、固定哈希、长度、期限；截断不通
   const m = meta(); m.delivery_expires_at = new Date(Date.parse(m.delivery_ready_at) + 1800000).toISOString(); let truncate = false;
   const server = createServer((req, res) => { assert.equal(req.method, 'GET'); assert.equal(req.headers.range, undefined); res.writeHead(200, { 'Content-Type': m.mime_type, 'Content-Length': m.bytes, 'X-IronWeave-Protocol': '2', 'X-IronWeave-Task-ID': task, 'X-IronWeave-Sha256': m.sha256, 'X-IronWeave-Delivery-Expires-At': m.delivery_expires_at, 'Accept-Ranges': 'none' }); if (truncate) { res.write(bytes.subarray(0, 3)); res.destroy(); } else res.end(bytes); });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)));
-  const config = { baseUrl: `http://127.0.0.1:${server.address().port}`, apiKey: 'fixture' }; let received = 0;
+  const config = { baseUrl: `http://127.0.0.1:${server.address().port}/v1`, apiKey: 'fixture' }; let received = 0;
   await fetchOutput(config, task, m, { expected: { size: '16x9' }, sink: chunk => { received += chunk.length; } }); assert.equal(received, bytes.length);
   truncate = true; await assert.rejects(fetchOutput(config, task, m, { sink() {} }));
 });
 
 test('媒体内部跨块 MIME 边界碰撞不能当成合法原流文件', async () => { await assert.rejects(receiveMixed(response(wire({ data: Buffer.from(`before--${boundary}after`) }), 7), { sink() {} }), /边界/); });
+
+async function errorFixture(t) {
+  const control = { status: 422, body: JSON.stringify({ error: { code: 'unsupported_capability', message: 'private upstream diagnostic' } }), headers: { 'Content-Type': 'application/json' } };
+  let calls = 0;
+  const server = createServer(async (req, res) => {
+    for await (const _ of req) {}
+    calls++; assert.ok(req.url.startsWith('/v1/'));
+    res.writeHead(control.status, control.headers); res.write(control.body);
+    if (control.truncate) setTimeout(() => res.destroy(), 10); else res.end();
+  });
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise(resolve => server.close(resolve)));
+  const config = { baseUrl: `http://127.0.0.1:${server.address().port}/v1`, apiKey: 'synthetic-key' };
+  return { control, config, get calls() { return calls; }, generate: async () => receiveMixed(await ironRequest(config, '/images/generations', { body: { prompt: 'synthetic', size: '16x9' } }), { sink() { assert.fail('拒绝响应不得写媒体'); } }) };
+}
+
+test('仅完整协议错误提供受理前确定拒绝证据，不转发上游原始消息', async t => {
+  const f = await errorFixture(t);
+  await assert.rejects(f.generate(), error => error.upstreamRejected === true && error.upstreamStatus === 422 && error.code === 'unsupported_capability' && !error.message.includes('private upstream'));
+  assert.equal(f.calls, 1);
+});
+
+for (const [label, change] of [
+  ['JSON 错误码重复', { body: '{"error":{"code":"commit_unavailable","code":"unsupported_capability","message":"private"}}' }],
+  ['无错误消息', { body: '{"error":{"code":"unsupported_capability"}}' }],
+  ['JSON 截断', { body: '{"error":{"code":"unsupported_capability","message":"private"}' }],
+  ['HTTP 截断，即使已收完整 JSON', { truncate: true, headers: { 'Content-Type': 'application/json', 'Content-Length': 1000 } }],
+  ['非法 UTF-8', { body: Buffer.from([123, 255, 125]) }],
+  ['超限 JSON', { body: JSON.stringify({ error: { code: 'unsupported_capability', message: 'x'.repeat(65536) } }) }],
+  ['非 JSON 类型', { headers: { 'Content-Type': 'text/html' } }],
+  ['压缩错误', { headers: { 'Content-Type': 'application/json', 'Content-Encoding': 'gzip' } }],
+  ['协议版本错误', { headers: { 'Content-Type': 'application/json', 'X-IronWeave-Protocol': '1' } }],
+  ['重复协议头', { headers: { 'Content-Type': ['application/json', 'text/html'] } }],
+  ['非受理前码', { body: '{"error":{"code":"delivery_expired","message":"private"}}' }],
+  ['非已知状态', { status: 429 }],
+  ['空错误码不可匹配未知状态', { status: 500, body: '{"error":{"code":"","message":"private"}}' }],
+  ['空错误消息', { body: '{"error":{"code":"unsupported_capability","message":""}}' }],
+  ['5xx 即使拒绝码', { status: 503 }],
+  ['200 错误对象不能冒充未受理', { status: 200 }],
+]) test(`${label} 不能证明生成明确未受理`, async t => {
+  const f = await errorFixture(t); Object.assign(f.control, change);
+  await assert.rejects(f.generate(), error => !error.upstreamRejected && !error.message.includes('private'));
+  assert.equal(f.calls, 1);
+});
+
+test('ACK 与 GET 只接受各自契约的拒绝，不能借其他入口错误猜终态', async t => {
+  const f = await errorFixture(t);
+  for (const call of [() => acknowledge(f.config, task, meta()), () => fetchOutput(f.config, task, null, { expected: { size: '16x9' }, sink() {} })]) {
+    await assert.rejects(call(), error => !error.upstreamRejected);
+  }
+  assert.equal(f.calls, 2);
+});

@@ -17,20 +17,23 @@ function page(fetch, id = '', type = 'text_to_image') {
     'api-config-title': { textContent: '测试接口' },
     'save-api-settings': node('save', { disabled: false, textContent: '保存配置' }),
     'check-api-connection': node('check', { disabled: !id, textContent: '测试模型（可能计费）' }),
-    'api-test-reference': { hidden: !['image_to_image', 'image_edit'].includes(type) },
+    'api-test-reference': { hidden: !['image_to_image', 'video'].includes(type) },
     'api-test-reference-image': { files: [], disabled: false },
     'settings-test-output': { textContent: '', hidden: true },
     'settings-test-image': { hidden: true, removeAttribute() { delete this.src; } },
     'api-key': { value: '', required: !id },
     'api-key-state': { textContent: '' },
     'api-base-url': { value: 'http://localhost:3001/v1' },
-    'api-model': { value: 'my-model' },
+    'api-model': { value: type === 'llm' ? 'my-model' : 'ironweave', readOnly: type !== 'llm' },
+    'api-test-video': { hidden: type !== 'video' },
+    'api-test-profile': { value: '0', disabled: false, replaceChildren(...options) { this.options = options; this.value = options[0]?.value || ''; } },
+    'api-test-prompt': { value: '  完整提示词\n第二行  ', disabled: false },
     'settings-error': { textContent: '' },
     'settings-status': { textContent: '', dataset: {} },
   };
   const redirects = [];
   runInNewContext(script, {
-    document: { getElementById: key => nodes[key] },
+    document: { getElementById: key => nodes[key], createElement: () => ({}) },
     window: { location: { assign: url => redirects.push(url) }, confirm: message => { confirmations.push(message); return confirmed; }, addEventListener: (event, handler) => { events[event] = handler; } },
     FormData: class {
       constructor(form) {
@@ -138,14 +141,14 @@ test('图生图测试先选参考图，提交 multipart；测试时阻止重复�
   let finish, calls = 0;
   const p = page((url, options) => {
     calls++;
-    assert.equal(options.body.get('referenceImage').name, 'reference.png');
+    assert.equal(options.body.getAll('referenceImages').map(file => file.name).join(','), 'reference.png,second.png');
     assert.equal(options.body.get('type'), 'image_to_image');
     return new Promise(resolve => { finish = resolve; });
   }, '3', 'image_to_image');
   await p.check();
   assert.match(p.nodes['settings-error'].textContent, /请先选择/);
   assert.equal(calls, 0);
-  p.nodes['api-test-reference-image'].files = [new File(['image'], 'reference.png', { type: 'image/png' })];
+  p.nodes['api-test-reference-image'].files = [new File(['image'], 'reference.png', { type: 'image/png' }), new File(['second'], 'second.png', { type: 'image/png' })];
   const checking = p.check();
   await p.check();
   assert.equal(calls, 1);
@@ -206,4 +209,65 @@ test('未保存修改离开时提醒，网络错误保留输入；未保存的�
   assert.equal(p.nodes['api-key'].value, 'typed-key');
   assert.match(p.nodes['settings-error'].textContent, /网络连接失败/);
   assert.equal(p.nodes['save-api-settings'].disabled, false);
+});
+
+
+test('视频测试真实事件发送五张有序参考、已选 profile 和原文提示词，结果不放入 img', async () => {
+  let calls = 0;
+  const p = page(async (url, options) => {
+    calls++;
+    assert.equal(url, '/settings/api/3/check');
+    assert.ok(options.body instanceof FormData);
+    assert.equal(options.body.get('profileIndex'), '0');
+    assert.equal(options.body.get('prompt'), '  完整提示词\n第二行  ');
+    assert.equal(options.body.get('apiKey'), null);
+    assert.equal(options.body.get('referenceImage'), null);
+    assert.deepEqual(options.body.getAll('referenceImages').map(file => file.name), ['0.png','1.png','2.png','3.png','4.png']);
+    return { ok: true, json: async () => ({ kind: 'video', verified: true, operation: { mediaUrl: '/operations/test/media' }, message: '视频已保存，请在操作历史查看。' }) };
+  }, '3', 'video');
+  assert.equal(p.nodes['api-test-reference'].hidden, false);
+  p.nodes['api-test-reference-image'].files = Array.from({length:5}, (_, i) => new File([String(i)], `${i}.png`, {type:'image/png'}));
+  await p.check(); assert.equal(calls, 1);
+  assert.equal(p.nodes['settings-test-image'].hidden, true); assert.equal(p.nodes['settings-test-image'].src, undefined);
+  assert.equal(p.nodes['settings-status'].dataset.state, 'verified');
+});
+
+test('前端图片数量、合计和单张限制先阻止请求，视频空提示词和未选组合不提交', async () => {
+  let calls=0;
+  const p = page(async () => { calls++; }, '3', 'video');
+  for (const files of [Array.from({length:52},()=>({size:1})), [{size:32*1024*1024+1}], [{size:17*1024*1024},{size:17*1024*1024}]]) {
+    p.nodes['api-test-reference-image'].files=files; await p.check(); assert.equal(calls,0);
+  }
+  p.nodes['api-test-reference-image'].files=[];
+  p.nodes['api-test-prompt'].value=' '; await p.check(); assert.equal(calls,0);
+  p.nodes['api-test-prompt'].value='完整提示词'; p.nodes['api-test-profile'].value=''; await p.check(); assert.equal(calls,0);
+});
+
+test('保存媒体不发送协议选择且固定模型，文字模型独立可编辑', async () => {
+  const requests=[];
+  const p=page(async (_url, options)=>{ requests.push(options.body); return {ok:true,json:async()=>({...result,type:options.body.get('type'),model:options.body.get('model')})}; },'3','llm');
+  p.edit('api-model','chat-custom'); await p.save(); assert.equal(requests.at(-1).get('model'),'chat-custom');
+  p.choose('video'); assert.equal(p.nodes['api-model'].readOnly,true); await p.save();
+  assert.equal(requests.at(-1).get('model'),'ironweave'); assert.equal(requests.at(-1).get('protocol'),null);
+  p.choose('llm'); assert.equal(p.nodes['api-model'].readOnly,false); assert.equal(p.nodes['api-model'].value,'chat-custom');
+});
+
+
+test('无参考视频的 12000 字中文提示词使用 FormData，原文和费用确认不变', async () => {
+  const prompt = '字'.repeat(12000);
+  let body;
+  const p = page(async (_url, options) => {
+    body = options.body;
+    return { ok: true, json: async () => ({ kind: 'video', verified: true, message: '视频已保存。' }) };
+  }, '3', 'video');
+  p.nodes['api-test-prompt'].value = prompt;
+  await p.check();
+  assert.ok(body instanceof FormData);
+  assert.equal(body.get('prompt'), prompt);
+  assert.equal(body.get('profileIndex'), '0');
+  assert.equal(body.get('chargeConfirmed'), 'yes');
+  assert.equal(body.get('apiKey'), null);
+  assert.equal(body.getAll('referenceImages').length, 0);
+  assert.equal(p.confirmations.length, 1);
+  assert.equal(p.nodes['settings-status'].dataset.state, 'verified');
 });

@@ -1,3 +1,4 @@
+import { png, sendImage, acknowledge, adoptResult, adoptResponse } from './helpers/weave-images.js';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { createServer } from 'node:http';
@@ -5,10 +6,7 @@ import { openDatabase } from '../src/database.js';
 import { createApp } from '../src/app.js';
 import { findLook, lookInputs, readLookImage } from '../src/looks.js';
 
-function png(width = 16, height = 9) {
-  const bytes = Buffer.alloc(33); Buffer.from([137,80,78,71,13,10,26,10]).copy(bytes);
-  bytes.write('IHDR', 12); bytes.writeUInt32BE(width, 16); bytes.writeUInt32BE(height, 20); return bytes;
-}
+
 async function listen(server) {
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
   return { url: `http://127.0.0.1:${server.address().port}`, close: () => new Promise(resolve => server.close(resolve)) };
@@ -20,21 +18,23 @@ async function fixture(t) {
     INSERT INTO seasons VALUES (1, 1, '一季', 1); INSERT INTO episodes VALUES (1, 1, '一集', 1);
     INSERT INTO episode_scripts (episode_id, script, revision) VALUES (1, '不许改的剧本', 2);`);
   db.prepare("INSERT INTO character_references (character_id, image, mime, width, height) VALUES (1, ?, 'image/png', 16, 9)").run(png());
-  const calls = []; let result = { data: [{ b64_json: png().toString('base64') }] }, status = 200, wait, started, finish;
+  const calls = []; let result = png(), status = 200, wait, started, finish;
   const provider = await listen(createServer(async (request, response) => {
     const chunks = []; for await (const chunk of request) chunks.push(chunk);
+    if (await acknowledge(db, request, response, Buffer.concat(chunks))) return;
     const form = await new Response(Buffer.concat(chunks), { headers: { 'Content-Type': request.headers['content-type'] } }).formData();
     const files = await Promise.all(form.getAll('image[]').map(async file => ({ type: file.type, name: file.name, bytes: Buffer.from(await file.arrayBuffer()) })));
     calls.push({ path: request.url, auth: request.headers.authorization, prompt: form.get('prompt'), model: form.get('model'), n: form.get('n'), size: form.get('size'), single: form.get('image'), files });
     if (wait) { started(); await wait; }
+    if (Buffer.isBuffer(result) && status === 200) { sendImage(response, result); return; }
     response.writeHead(status, { 'Content-Type': 'application/json' }); response.end(JSON.stringify(result));
   }));
-  db.prepare("INSERT INTO api_configs (id,name,type,base_url,api_key,model) VALUES (1,'图生图','image_to_image',?,'SYNTHETIC_LOOK_KEY','edit-model'), (2,'文生图','text_to_image',?,'SYNTHETIC_T2I_KEY','image-model')").run(provider.url + '/v1', provider.url + '/v1');
+  db.prepare("INSERT INTO api_configs (id,name,type,base_url,api_key,model) VALUES (1,'图生图','image_to_image',?,'SYNTHETIC_LOOK_KEY','ironweave'), (2,'文生图','text_to_image',?,'SYNTHETIC_T2I_KEY','ironweave')").run(provider.url + '/v1', provider.url + '/v1');
   const app = await listen(createApp(db));
   t.after(async () => { finish?.(); await app.close(); await provider.close(); });
   const post = (path, fields, options = {}) => fetch(app.url + path, { method: 'POST', body: fields instanceof FormData ? fields : new URLSearchParams(fields), ...options });
   const current = id => findLook(db, 1, id);
-  const generateFields = id => ({ revision: String(current(id).revision), inputRevision: lookInputs(db, 1, current(id)).revision, apiConfigId: '1', model: 'edit-model', baseUrl: provider.url + '/v1', chargeConfirmed: 'yes' });
+  const generateFields = id => ({ revision: String(current(id).revision), inputRevision: lookInputs(db, 1, current(id)).revision, apiConfigId: '1', model: 'ironweave', baseUrl: provider.url + '/v1', chargeConfirmed: 'yes', size: '16x9' });
   const upload = (kind, id, bytes = png(2, 3), type = 'image/png') => {
     const asset = db.prepare('SELECT revision FROM production_assets WHERE id=?').get(id);
     const old = db.prepare('SELECT id FROM production_asset_images WHERE asset_id=? AND cleared=0 ORDER BY id DESC LIMIT 1').get(id);
@@ -52,6 +52,7 @@ async function fixture(t) {
   };
   return { db, ...app, calls, post, current, generateFields, upload, ready,
     generate: (id, overrides = {}) => post(`/projects/1/looks/${id}/generate`, { ...generateFields(id), ...overrides }),
+    generateAndAdopt: async (id, overrides = {}) => adoptResponse(app.url, await post(`/projects/1/looks/${id}/generate`, { ...generateFields(id), ...overrides }), 'look', id),
     result(value, code = 200) { result=value; status=code; },
     pause() { wait=new Promise(resolve=>{finish=resolve;}); return new Promise(resolve=>{started=resolve;}); },
     resume() { finish(); wait=undefined; },
@@ -91,13 +92,14 @@ test('素材图上传替换与清除保留历史、不复活旧图；字节/MIME
 
 test('定妆单次真实multipart多图字段按演员/服饰/道具顺序，原提示词和版本快照落库；生成后不误标旧版，清图保留历史', async t => {
   const f=await fixture(t), id=await f.ready(), before=f.current(id), hash=lookInputs(f.db,1,before).revision, unchanged=immutable(f.db);
-  const response=await f.generate(id); assert.equal(response.status,200); const result=await response.json();
-  assert.equal(f.calls.length,1); const call=f.calls[0]; assert.equal(call.path,'/v1/images/edits'); assert.equal(call.auth,'Bearer SYNTHETIC_LOOK_KEY'); assert.equal(call.model,'edit-model'); assert.equal(call.n,'1'); assert.equal(call.size,'2560x1440'); assert.equal(call.single,null);
+  const response=await f.generateAndAdopt(id); assert.equal(response.status,200); const result=await response.json();
+  assert.equal(f.db.prepare('SELECT length(image) AS n FROM look_images').get().n,0);
+  assert.equal(f.calls.length,1); const call=f.calls[0]; assert.equal(call.path,'/v1/images/edits'); assert.equal(call.auth,'Bearer SYNTHETIC_LOOK_KEY'); assert.equal(call.model,'ironweave'); assert.equal(call.n,'1'); assert.equal(call.size,'16x9'); assert.equal(call.single,null);
   assert.equal(call.files.length,3); assert.deepEqual(call.files.map(file=>file.bytes),[png(),png(2,3),png(4,3)]); assert.ok(call.prompt.replaceAll('\r\n','\n').endsWith(before.prompt), 'multipart正常统一换行，但不改写提示词内容');
-  const image=f.db.prepare('SELECT * FROM look_images WHERE id=?').get(result.id); assert.equal(image.valid,1); assert.equal(image.revision,hash); assert.equal(image.prompt,call.prompt.replaceAll('\r\n','\n')); assert.equal(image.model,'edit-model');
+  const image=f.db.prepare('SELECT * FROM look_images WHERE id=?').get(result.id); assert.equal(image.valid,1); assert.equal(image.revision,hash); assert.equal(image.prompt,call.prompt.replaceAll('\r\n','\n')); assert.equal(image.model,'ironweave');
   const inputs=JSON.parse(image.inputs_json); assert.equal(inputs.character.id,1); assert.equal(inputs.character.image.type,'references'); assert.deepEqual(inputs.assets.map(a=>a.kind),['costumes','props']); assert.ok(!image.inputs_json.includes('SYNTHETIC_LOOK_KEY'));
   assert.equal(f.current(id).revision,before.revision+1); assert.equal(lookInputs(f.db,1,f.current(id)).revision,hash); assert.deepEqual(immutable(f.db),unchanged);
-  assert.equal((await f.generate(id)).status,200); const current=readLookImage(f.db,id);
+  assert.equal((await f.generateAndAdopt(id)).status,200); const current=readLookImage(f.db,id);
   assert.equal((await f.post(`/projects/1/looks/${id}/clear-image`,{revision:String(f.current(id).revision),imageId:String(image.id),confirmed:'yes'})).status,409);
   assert.equal((await f.post(`/projects/1/looks/${id}/clear-image`,{revision:String(f.current(id).revision),imageId:String(current.id),confirmed:'yes'})).status,200);
   assert.equal(readLookImage(f.db,id),null); assert.equal((await fetch(`${f.url}/projects/1/looks/${id}/images/${image.id}`)).status,200);
@@ -111,17 +113,17 @@ test('定妆固定基础演员四视图16:9，不跟随成片比例；旧格式�
   f.db.prepare("INSERT INTO look_images(look_id,image,mime,width,height,valid,revision,model,prompt,inputs_json)VALUES(? ,?,'image/png',9,16,1,'old-free-form-hash','fake-model','old-user-prompt',?)").run(id,png(9,16),JSON.stringify(old));
   const page=await fetch(`${f.url}/projects/1?resource=looks&look=${id}`); assert.equal(page.status,200);
   assert.match(await page.text(),/当前图使用旧依据/); assert.equal(f.calls.length,0);
-  assert.equal((await f.generate(id)).status,200); assert.equal(f.calls[0].size,'2560x1440');
+  assert.equal((await f.generateAndAdopt(id)).status,200); assert.equal(f.calls[0].size,'16x9');
   assert.match(f.calls[0].prompt,/FRONTAL FACE CLOSE-UP[\s\S]*FRONT FULL-BODY VIEW[\s\S]*LEFT-FACING SIDE FULL-BODY VIEW[\s\S]*BACK FULL-BODY VIEW/);
   assert.equal(f.db.prepare('SELECT count(*) AS n FROM look_images').get().n,2);
   assert.equal((await fetch(`${f.url}/projects/1/looks/${id}/images/1`)).status,200);
 });
 
 test('定妆修图沿用演员503合同：核实归属，不发模型、不改图片、无整图回退', async t => {
-  const f=await fixture(t), id=await f.ready(); assert.equal((await f.generate(id)).status,200);
+  const f=await fixture(t), id=await f.ready(); assert.equal((await f.generateAndAdopt(id)).status,200);
   const before=f.db.prepare('SELECT * FROM look_images').all(), look=f.current(id);
   const response=await f.post(`/projects/1/looks/${id}/edit-image`,{instruction:'只改衣领',apiConfigId:'1'}); assert.equal(response.status,503);
-  assert.equal((await response.json()).error,'遮罩修图接口尚未接入，不会调用模型或回退为整图编辑。');
+  assert.equal((await response.json()).error,'Weave 不支持遮罩修图；此入口已停用，不会调用模型或回退为整图编辑。');
   assert.equal((await f.post(`/projects/2/looks/${id}/edit-image`,{})).status,404);
   assert.equal((await f.post('/projects/1/looks/999/edit-image',{})).status,404);
   assert.equal((await f.post('/projects/1/costumes/1/edit-image',{})).status,404);
@@ -134,48 +136,61 @@ test('只有演员也固定使用image[]；优先有效基础图，较新的无�
   assert.equal((await f.post(`/projects/1/looks/${id}`,{revision:String(look.revision),name:look.name,characterId:'1',prompt:look.prompt,assetIds:'[]'})).status,200);
   const insert=f.db.prepare("INSERT INTO character_boards(character_id,image,mime,width,height,valid,revision,model,prompt)VALUES(1,?,'image/png',32,18,?,'synthetic','fake-model','fake-prompt')");
   insert.run(png(32,18),1); insert.run(png(64,36),0);
-  assert.equal((await f.generate(id)).status,200); assert.equal(f.calls.length,1); assert.equal(f.calls[0].files.length,1);
+  assert.equal((await f.generateAndAdopt(id)).status,200); assert.equal(f.calls.length,1); assert.equal(f.calls[0].files.length,1);
   assert.equal(f.calls[0].single,null); assert.deepEqual(f.calls[0].files[0].bytes,png(32,18));
   const image=f.db.prepare('SELECT inputs_json FROM look_images').get(); assert.equal(JSON.parse(image.inputs_json).character.image.type,'boards');
 });
 
 test('缺图/旧快照/空提示词/错误API/重复参数/跨站与错格式在计费前拒绝，无协议回退', async t => {
   const f=await fixture(t), id=await f.ready();
-  for(const fields of [{revision:'0'},{inputRevision:'old'},{chargeConfirmed:'no'},{apiConfigId:'2'},{model:'wrong'},{baseUrl:'https://wrong.invalid'},{apiConfigId:'1.0'}]) assert.ok([400,409].includes((await f.generate(id,fields)).status));
+  for(const fields of [{revision:'0'},{inputRevision:'old'},{chargeConfirmed:'no'},{apiConfigId:'2'},{model:'wrong'},{baseUrl:'https://wrong.invalid'},{apiConfigId:'1.0'}]) assert.ok([400,409].includes((await f.generateAndAdopt(id,fields)).status));
   for(const key of Object.keys(f.generateFields(id))){const fields=new URLSearchParams(f.generateFields(id));fields.append(key,fields.get(key));assert.ok([400,409].includes((await f.post(`/projects/1/looks/${id}/generate`,fields)).status),key);}
   assert.equal((await f.post(`/projects/2/looks/${id}/generate`,f.generateFields(id))).status,404);
   for(const headers of [{Origin:'https://elsewhere.invalid'},{'Sec-Fetch-Site':'cross-site'},{'Content-Type':'application/json'}]) assert.ok([403,415].includes((await f.post(`/projects/1/looks/${id}/generate`,f.generateFields(id),{headers})).status));
   f.db.exec('UPDATE character_references SET image=zeroblob(32*1024*1024)');
-  const large=await f.generate(id); assert.equal(large.status,400); assert.match((await large.json()).error,/32 MiB/);
+  const large=await f.generateAndAdopt(id); assert.equal(large.status,400); assert.match((await large.json()).error,/32 MiB/);
   f.db.prepare('UPDATE character_references SET image=?').run(png());
   f.db.exec("UPDATE production_asset_images SET image=X'0102' WHERE asset_id=1");
-  const corrupt=await f.generate(id); assert.equal(corrupt.status,400); assert.match((await corrupt.json()).error,/已损坏/);
+  const corrupt=await f.generateAndAdopt(id); assert.equal(corrupt.status,400); assert.match((await corrupt.json()).error,/已损坏/);
   f.db.prepare('UPDATE production_asset_images SET image=? WHERE asset_id=1').run(png(2,3));
-  f.db.exec('UPDATE production_asset_images SET cleared=1 WHERE asset_id=1'); assert.equal((await f.generate(id)).status,400);
-  f.db.exec('DELETE FROM look_assets WHERE asset_id=1; UPDATE character_references SET cleared=1'); assert.equal((await f.generate(id)).status,400);
-  f.db.exec("UPDATE looks SET character_id=NULL,prompt='' WHERE id=1"); assert.equal((await f.generate(id)).status,400); assert.equal(f.calls.length,0);
+  f.db.exec('UPDATE production_asset_images SET cleared=1 WHERE asset_id=1'); assert.equal((await f.generateAndAdopt(id)).status,400);
+  f.db.exec('DELETE FROM look_assets WHERE asset_id=1; UPDATE character_references SET cleared=1'); assert.equal((await f.generateAndAdopt(id)).status,400);
+  f.db.exec("UPDATE looks SET character_id=NULL,prompt='' WHERE id=1"); assert.equal((await f.generateAndAdopt(id)).status,400); assert.equal(f.calls.length,0);
 });
 
-test('无效尺寸/非图片结果/服务商失败保持旧图且不重试，存储失败返回可下载的付费结果', async t => {
-  const f=await fixture(t), id=await f.ready(); assert.equal((await f.generate(id)).status,200); const old=readLookImage(f.db,id);
-  f.result({data:[{b64_json:png(1,1).toString('base64')}]}); const invalid=await f.generate(id); assert.equal(invalid.status,502); const recovery=await invalid.json(); assert.match(recovery.recoveryImage,/^\/projects\/1\/looks\/1\/images\//); assert.equal(readLookImage(f.db,id).id,old.id); assert.equal(f.db.prepare('SELECT valid FROM look_images ORDER BY id DESC LIMIT 1').get().valid,0);
-  f.result({task_id:'not an image'}); assert.equal((await f.generate(id)).status,502); assert.equal(readLookImage(f.db,id).id,old.id);
-  f.result({error:{message:'SYNTHETIC_LOOK_KEY failed'}},400); const failure=await (await f.generate(id)).json(); assert.ok(!failure.error.includes('SYNTHETIC_LOOK_KEY'));
-  f.result({data:[{b64_json:png().toString('base64')}]}); const prepare=f.db.prepare.bind(f.db);
-  t.mock.method(f.db,'prepare',sql=>{if(sql.startsWith('INSERT INTO look_images'))throw new Error('simulated storage failure');return prepare(sql);});
-  const failed=await f.generate(id); assert.equal(failed.status,502); const data=await failed.json(); assert.equal(data.recoveryImage,`data:image/png;base64,${png().toString('base64')}`); t.mock.restoreAll();
-  assert.equal(readLookImage(f.db,id).id,old.id); assert.equal(f.calls.length,5);
+test('无效尺寸、非图片与服务商拒绝保持旧图且不重试；采用事务失败保留已确认文件', async t => {
+  const f = await fixture(t), id = await f.ready(); assert.equal((await f.generateAndAdopt(id)).status, 200);
+  const old = readLookImage(f.db, id);
+  const release = async () => {
+    for (const row of f.db.prepare('SELECT id FROM generation_operations WHERE active=1').all()) {
+      assert.equal((await f.post(`/projects/1/operations/${row.id}/release`, { confirmed: 'yes' })).status, 200);
+    }
+  };
+  f.result(png(1, 1)); assert.equal((await f.generate(id)).status, 502);
+  assert.equal(readLookImage(f.db, id).id, old.id); assert.equal(f.db.prepare('SELECT count(*) AS n FROM look_images').get().n, 1);
+  await release(); f.result({ task_id: 'not an image' }); assert.equal((await f.generate(id)).status, 502);
+  await release(); f.result({ error: { message: 'SYNTHETIC_LOOK_KEY failed' } }, 400);
+  const failure = await (await f.generate(id)).json(); assert.ok(!failure.error.includes('SYNTHETIC_LOOK_KEY'));
+  await release(); f.result(png());
+  const generated = await (await f.generate(id)).json(); assert.equal(generated.operation.deliveryConfirmed, true);
+  f.db.exec("CREATE TRIGGER fail_look_adopt BEFORE INSERT ON look_images BEGIN SELECT RAISE(ABORT,'simulated storage failure'); END");
+  await assert.rejects(adoptResult(f.url, generated, 'look', id), { status: 500 });
+  assert.equal(readLookImage(f.db, id).id, old.id); assert.equal(f.calls.length, 5);
+  assert.deepEqual(Buffer.from(await (await fetch(f.url + generated.imageUrl)).arrayBuffer()), png());
+  assert.equal(f.db.prepare('SELECT count(*) AS n FROM generated_media_links').get().n, 1);
+  f.db.exec('DROP TRIGGER fail_look_adopt');
+  await adoptResult(f.url, generated, 'look', id); assert.equal(f.calls.length, 5);
 });
 
 test('生成锁阻止本定妆与演员/项目删除；素材更新使新结果存旧依据而不替换原图，锁最终释放', async t => {
-  const f=await fixture(t), id=await f.ready(); assert.equal((await f.generate(id)).status,200); const old=readLookImage(f.db,id);
+  const f=await fixture(t), id=await f.ready(); assert.equal((await f.generateAndAdopt(id)).status,200); const old=readLookImage(f.db,id);
   const started=f.pause(), pending=f.generate(id); await started;
   const look=f.current(id); const save={revision:String(look.revision),name:look.name,characterId:'1',prompt:look.prompt,assetIds:'[1,2]'};
-  assert.equal((await f.post(`/projects/1/looks/${id}`,save)).status,409); assert.equal((await f.generate(id)).status,409);
+  assert.equal((await f.post(`/projects/1/looks/${id}`,save)).status,409); assert.equal((await f.generateAndAdopt(id)).status,409);
   assert.equal((await f.post(`/projects/1/looks/${id}/clear-image`,{revision:String(look.revision),imageId:String(old.id),confirmed:'yes'})).status,409);
   for(const[path,name]of[[`/projects/1/looks/${id}/delete`,look.name],['/projects/1/characters/1/delete','演员'],['/projects/1/delete','定妆测试']]) assert.equal((await f.post(path,{confirmed:'yes',name})).status,409);
   assert.equal((await f.upload('costumes',1,png(5,6))).status,200);
-  f.resume(); const response=await pending; assert.equal(response.status,409); assert.match((await response.json()).recoveryImage,/images\//); assert.equal(readLookImage(f.db,id).id,old.id); assert.equal(f.calls.length,2);
+  f.resume(); const response=await pending; assert.equal(response.status,200); const result=await response.json(); await assert.rejects(adoptResult(f.url,result,'look',id),{status:409}); assert.equal(result.operation.deliveryConfirmed,true); assert.equal(readLookImage(f.db,id).id,old.id); assert.equal(f.calls.length,2);
   assert.equal((await f.post(`/projects/1/looks/${id}/delete`,{confirmed:'yes',name:look.name})).status,200);
   assert.equal(f.db.prepare('SELECT count(*) AS n FROM characters').get().n,2); assert.equal(f.db.prepare('SELECT count(*) AS n FROM production_assets').get().n,2); assert.equal(f.db.prepare('SELECT count(*) AS n FROM look_images').get().n,0);
 });

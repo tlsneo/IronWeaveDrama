@@ -28,11 +28,11 @@ async function fixture(t, mode) {
     if (mode === 'end') { event({ type: 'error', task_id: task, seq: 2, state: 'failed', error: { code: 'runtime_failed', message: 'synthetic', phase: 'running' } }); res.end(`--${boundary}--\r\n`); }
     else { const timer = setInterval(() => event({ type: 'heartbeat', task_id: task, seq: 2, state: 'accepted' }), 1000); res.on('close', () => { clearInterval(timer); resolveClosed(); }); }
   })); t.after(provider.close);
-  db.prepare("INSERT INTO api_configs(name,type,base_url,api_key,model) VALUES('合成','text_to_image',?,'synthetic-key','ironweave')").run(provider.url);
+  db.prepare("INSERT INTO api_configs(name,type,base_url,api_key,model) VALUES('合成','text_to_image',?,'synthetic-key','ironweave')").run(provider.url + '/v1');
   db.exec("INSERT INTO api_protocols(config_id,protocol) VALUES(1,'ironweave2')");
   const app = await listen(createApp(db)); t.after(app.close);
   const source = resourceRevision('scene', db.prepare('SELECT * FROM scenes WHERE id=1').get(), db.prepare('SELECT * FROM projects WHERE id=1').get());
-  const body = () => new URLSearchParams({ size: '1536x864', apiConfigId: '1', chargeConfirmed: 'yes', revision: source, model: 'ironweave', baseUrl: provider.url, referenceId: '' });
+  const body = () => new URLSearchParams({ size: '1536x864', apiConfigId: '1', chargeConfirmed: 'yes', revision: source, model: 'ironweave', baseUrl: provider.url + '/v1', referenceId: '' });
   return { db, app, body, source, closed, calls: () => posts };
 }
 test('显式 NDJSON 包含操作、真实 accepted 与最终业务错误；普通 CRUD 保持 JSON', async t => {
@@ -60,7 +60,7 @@ test('完整未确认文件可人工采用；历史不自动采用，旧依据�
   f.db.prepare("INSERT INTO generation_operations(id,project_id,kind,target_id,config_id,config_json,source_json,request_json,metadata_json,task_state,local_state,active) VALUES(?,1,'scene',1,1,'{}',?,'{}',?,'delivering','saved',0)").run(id, JSON.stringify({ revision: f.source, referenceId: null, model: 'ironweave', prompt: 'controlled source' }), JSON.stringify(meta));
   const base = f.app.url + `/projects/1/operations/${id}`;
   assert.equal(f.db.prepare('SELECT count(*) AS n FROM scene_images').get().n, 0);
-  const history = await (await fetch(f.app.url + '/projects/1/operations')).text(); assert.match(history, /交付确认未确定/);
+  const history = await (await fetch(f.app.url + '/projects/1/operations')).text(); assert.match(history, /交付尚未确认/);
   assert.equal((await fetch(f.app.url + `/projects/2/operations/${id}/media`)).status, 404);
   f.db.exec("UPDATE scenes SET description='changed' WHERE id=1");
   assert.equal((await fetch(base + '/adopt', { method: 'POST', body: new URLSearchParams({ confirmed: 'yes' }) })).status, 409);

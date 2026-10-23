@@ -13,6 +13,12 @@ if (form) {
   const typeSelect = document.getElementById('api-type');
   const keyInput = document.getElementById('api-key');
   const keyState = document.getElementById('api-key-state');
+  const modelInput = document.getElementById('api-model');
+  const videoPanel = document.getElementById('api-test-video');
+  const profileSelect = document.getElementById('api-test-profile');
+  const promptInput = document.getElementById('api-test-prompt');
+  let lastType = typeSelect.value;
+  let chatModel = lastType === 'llm' ? modelInput.value : '';
   const errorElement = document.getElementById('settings-error');
   const statusElement = document.getElementById('settings-status');
   const referencePanel = document.getElementById('api-test-reference');
@@ -34,6 +40,8 @@ if (form) {
     const activeButton = saving ? saveButton : checkButton;
     activeButton.textContent = saving ? '保存中…' : '实际调用中…';
     referenceInput.disabled = true;
+    profileSelect.disabled = true;
+    promptInput.disabled = true;
     errorElement.textContent = '';
     statusElement.textContent = saving ? '' : '正在实际调用模型，可能计费，请勿重复提交。';
     statusElement.dataset.state = 'pending';
@@ -55,9 +63,12 @@ if (form) {
         document.getElementById('api-name').value = result.name;
         document.getElementById('api-config-title').textContent = result.name;
         typeSelect.value = result.type;
-        referencePanel.hidden = !['image_to_image', 'image_edit'].includes(typeSelect.value);
+        updateType();
         document.getElementById('api-base-url').value = result.baseUrl;
-        document.getElementById('api-model').value = result.model;
+        modelInput.value = result.model;
+        if (result.type === 'llm') chatModel = result.model;
+        const choices = [{ value: '', label: '请选择参数组合' }, ...(result.videoProfiles || []).map((profile, index) => ({ value: String(index), label: `${profile.size} · ${profile.frames} 帧 · ${profile.fps} fps` }))];
+        profileSelect.replaceChildren(...choices.map(choice => { const option = document.createElement('option'); option.value = choice.value; option.textContent = choice.label; return option; }));
         keyState.textContent = '这条配置已保存密钥。留空保持原密钥，填写新值则替换。';
       }
       statusElement.textContent = result.message;
@@ -97,8 +108,21 @@ if (form) {
       checkButton.disabled = !configured || dirty;
       saveButton.textContent = '保存配置';
       referenceInput.disabled = false;
+      profileSelect.disabled = false;
+      promptInput.disabled = false;
       checkButton.textContent = '测试模型（可能计费）';
     }
+  }
+
+  function updateType() {
+    if (typeSelect.value !== lastType) {
+      if (lastType === 'llm') chatModel = modelInput.value;
+      modelInput.value = typeSelect.value === 'llm' ? chatModel : 'ironweave';
+      lastType = typeSelect.value;
+    }
+    modelInput.readOnly = typeSelect.value !== 'llm';
+    referencePanel.hidden = !['image_to_image', 'video'].includes(typeSelect.value);
+    videoPanel.hidden = typeSelect.value !== 'video';
   }
 
   function markDirty() {
@@ -106,36 +130,36 @@ if (form) {
     checkButton.disabled = true;
     statusElement.textContent = '配置已修改，请先保存再测试模型。';
     statusElement.dataset.state = 'unverified';
-    referencePanel.hidden = !['image_to_image', 'image_edit'].includes(typeSelect.value);
+    updateType();
   }
   form.addEventListener('input', markDirty);
   form.addEventListener('change', markDirty);
   form.addEventListener('submit', event => {
     event.preventDefault();
-    return submit(`/settings/api${form.dataset.id ? `/${form.dataset.id}` : ''}`, new URLSearchParams(new FormData(form)), true);
+    const body = new URLSearchParams(new FormData(form));
+    if (typeSelect.value !== 'llm') body.set('model', 'ironweave');
+    return submit(`/settings/api${form.dataset.id ? `/${form.dataset.id}` : ''}`, body, true);
   });
   checkButton.addEventListener('click', () => {
     if (busy || !configured || dirty || !form.dataset.id) return;
-    const needsImage = ['image_to_image', 'image_edit'].includes(typeSelect.value);
-    const image = referenceInput.files[0];
-    if (needsImage && (!image || image.size > 5 * 1024 * 1024)) {
-      errorElement.textContent = image ? '参考图最多 5 MiB。' : '请先选择测试参考图。';
-      return;
+    const isVideo = typeSelect.value === 'video';
+    const needsImage = typeSelect.value === 'image_to_image';
+    const images = needsImage || isVideo ? Array.from(referenceInput.files) : [];
+    if (needsImage && !images.length) { errorElement.textContent = '请先选择测试参考图。'; return; }
+    if (images.length > 51 || images.some(image => image.size > 32 * 1024 * 1024) || images.reduce((total, image) => total + image.size, 0) > 32 * 1024 * 1024) {
+      errorElement.textContent = '参考图最多 51 张，每张及合计最多 32 MiB。'; return;
+    }
+    if (isVideo && (!/^(0|[1-9]\d*)$/.test(profileSelect.value) || !promptInput.value.trim() || [...promptInput.value].length > 12000)) {
+      errorElement.textContent = '请选择已保存的视频参数组合，并填写完整提示词（最多 12000 个 Unicode 字符）。'; return;
     }
     if (!window.confirm('将实际调用这条配置已保存的模型一次，可能消耗额度或扣费。不会自动重试。是否继续？')) return;
-    const body = needsImage ? new FormData() : new URLSearchParams();
+    const body = isVideo || images.length ? new FormData() : new URLSearchParams();
     body.set('chargeConfirmed', 'yes');
     body.set('type', typeSelect.value);
-    body.set('model', document.getElementById('api-model').value);
+    body.set('model', modelInput.value);
     body.set('baseUrl', document.getElementById('api-base-url').value);
-    if (needsImage) body.set('referenceImage', image);
-    if (typeSelect.value === 'video') {
-      const choice = window.prompt('请输入已保存视频参数组合的序号（从 0 开始）；本次为单文件测试，不代表实机能力已验证。');
-      if (choice === null) return;
-      const prompt = window.prompt('请输入本次视频测试的完整提示词（不会自动扩写）：');
-      if (!prompt) return;
-      body.set('profileIndex', choice); body.set('prompt', prompt);
-    }
+    for (const image of images) body.append('referenceImages', image);
+    if (isVideo) { body.set('profileIndex', profileSelect.value); body.set('prompt', promptInput.value); }
     return submit(`/settings/api/${form.dataset.id}/check`, body, false);
   });
   window.addEventListener('beforeunload', event => {

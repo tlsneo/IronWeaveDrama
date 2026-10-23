@@ -48,7 +48,7 @@ test('六段缺失、虚构标签、非法切点、未知模式、非整数帧�
   assert.throws(() => saveClip(f.db, 1, 1, null, f.form({ profile: '{"size":"16x9","frames":124.5,"fps":24}' })), { status: 400 });
 });
 test('页面展示完整六段、真实分数时长、人工生成按钮；读页面不调用任何模型', t => {
-  const f = fixture(t); f.db.exec("INSERT INTO api_configs(name,type,base_url,api_key,model) VALUES('本地视频','video','http://127.0.0.1:1','synthetic-secret','ironweave'); INSERT INTO api_protocols(config_id,protocol,video_profiles) VALUES(1,'ironweave2','[{\"size\":\"16x9\",\"frames\":124,\"fps\":24}]')");
+  const f = fixture(t); f.db.exec("INSERT INTO api_configs(name,type,base_url,api_key,model) VALUES('本地视频','video','http://127.0.0.1:1/v1','synthetic-secret','ironweave'); INSERT INTO api_protocols(config_id,protocol,video_profiles) VALUES(1,'ironweave2','[{\"size\":\"16x9\",\"frames\":124,\"fps\":24}]')");
   const html = renderProduction(f.db, 1, 1, new URLSearchParams());
   for (const name of sectionNames) assert.match(html, new RegExp(`name="${name}"`)); assert.match(html, /5\.166666/); assert.doesNotMatch(html, /synthetic-secret/); assert.match(html, /不增加文字模型/);
 });

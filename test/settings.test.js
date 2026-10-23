@@ -9,7 +9,7 @@ import { openDatabase } from '../src/database.js';
 import { apiTypes } from '../src/settings.js';
 
 const secret = 'test-private-api-key';
-const config = { name: '图片测试接口', type: 'text_to_image', baseUrl: 'http://127.0.0.1:1/v1', apiKey: secret, model: 'my-image-model' };
+const config = { name: '图片测试接口', type: 'text_to_image', baseUrl: 'http://127.0.0.1:1/v1', apiKey: secret, model: 'ironweave' };
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aapcAAAAASUVORK5CYII=';
 const testFields = record => ({ chargeConfirmed: 'yes', type: record.type, model: record.model, baseUrl: record.baseUrl });
 
@@ -36,10 +36,10 @@ async function saved(response, status = 201) {
   return response.json();
 }
 
-test('首页设置打开卡片列表和添加入口，无登录；类型下拉筛选四类，新建表单不混入角色板尺寸', async t => {
+test('首页设置打开卡片列表和添加入口，无登录；类型下拉筛选四类（旧遮罩只读），新建表单不混入角色板尺寸', async t => {
   const f = await fixture(t);
   assert.match(await (await f.get('/')).text(), /href="\/settings"/);
-  assert.deepEqual([...apiTypes.keys()], ['text_to_image', 'llm', 'image_to_image', 'image_edit', 'video']);
+  assert.deepEqual([...apiTypes.keys()], ['text_to_image', 'llm', 'image_to_image', 'video']);
   const response = await f.get('/settings');
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('www-authenticate'), null);
@@ -60,7 +60,10 @@ test('首页设置打开卡片列表和添加入口，无登录；类型下拉�
     assert.match(html, /href="\/settings\?type=/);
     assert.match(html, /id="theme-toggle"/);
     assert.match(html, /测试模型（可能计费）/);
-    assert.match(html, /id="api-test-reference-image"/);
+    assert.match(html, /id="api-test-reference-image"[^>]*multiple/);
+    assert.doesNotMatch(html, /id="api-protocol"|name="protocol"/);
+    assert.match(html, /id="api-test-profile"/);
+    assert.match(html, /id="api-test-prompt"/);
     assert.doesNotMatch(html, /只读取 \/models|不会调用模型；不提供模型列表/);
     assert.doesNotMatch(html, /IRONWEAVE_SETTINGS_PASSWORD|登录|name="size"|例如|<!-- API_SETTINGS -->/);
   }
@@ -73,8 +76,8 @@ test('首页设置打开卡片列表和添加入口，无登录；类型下拉�
 
 test('一条真实配置一张可点击卡片，同类型可添加多条；按 ID 编辑和替换密钥不覆盖其他卡片', async t => {
   const f = await fixture(t);
-  const first = await saved(await f.post('/settings/api', { ...config, baseUrl: `${config.baseUrl}///` }));
-  const second = await saved(await f.post('/settings/api', { ...config, name: '另一图片接口', apiKey: 'second-secret', model: 'another-model' }));
+  const first = await saved(await f.post('/settings/api', { ...config, type: 'llm', model: 'my-image-model', baseUrl: `${config.baseUrl}///` }));
+  const second = await saved(await f.post('/settings/api', { ...config, type: 'llm', name: '另一图片接口', apiKey: 'second-secret', model: 'another-model' }));
   assert.notEqual(first.id, second.id);
   assert.equal(first.baseUrl, config.baseUrl);
   assert.ok(!JSON.stringify(first).includes(secret));
@@ -93,10 +96,10 @@ test('一条真实配置一张可点击卡片，同类型可添加多条；按 I
   assert.match(html, /value="图片测试接口"/);
   assert.match(html, /value="my-image-model"/);
   assert.doesNotMatch(html, /another-model|second-secret/);
-  await saved(await f.post(`/settings/api/${first.id}`, { ...config, name: '已改名', apiKey: '', model: 'new-model' }), 200);
+  await saved(await f.post(`/settings/api/${first.id}`, { ...config, type: 'llm', name: '已改名', apiKey: '', model: 'new-model' }), 200);
   assert.equal(f.database.prepare('SELECT api_key FROM api_configs WHERE id = ?').get(first.id).api_key, secret);
   assert.equal(f.database.prepare('SELECT model FROM api_configs WHERE id = ?').get(second.id).model, 'another-model');
-  await saved(await f.post(`/settings/api/${first.id}`, { ...config, apiKey: 'new-secret' }), 200);
+  await saved(await f.post(`/settings/api/${first.id}`, { ...config, type: 'llm', apiKey: 'new-secret' }), 200);
   assert.equal(f.database.prepare('SELECT api_key FROM api_configs WHERE id = ?').get(first.id).api_key, 'new-secret');
   assert.equal(f.database.prepare('SELECT count(*) AS count FROM api_configs').get().count, 2);
 });
@@ -113,16 +116,16 @@ test('类型下拉只筛选卡片，详情按配置 ID 读取；更换类型保�
     for (const record of records) assert.equal(html.includes(`config=${record.id}&amp;type=${type}`), record.type === type);
   }
   const first = records[0];
-  await saved(await f.post(`/settings/api/${first.id}`, { ...config, type: 'image_edit', apiKey: '' }), 200);
+  await saved(await f.post(`/settings/api/${first.id}`, { ...config, type: 'image_to_image', apiKey: '' }), 200);
   const row = f.database.prepare('SELECT * FROM api_configs WHERE id = ?').get(first.id);
-  assert.equal(row.type, 'image_edit');
+  assert.equal(row.type, 'image_to_image');
   assert.equal(row.api_key, `${secret}-text_to_image`);
-  assert.equal(f.database.prepare("SELECT count(*) AS count FROM api_configs WHERE type = 'image_edit'").get().count, 2);
+  assert.equal(f.database.prepare("SELECT count(*) AS count FROM api_configs WHERE type = 'image_to_image'").get().count, 2);
 });
 
 test('配置名称和模型安全转义，列表、详情、保存响应都不回传密钥', async t => {
   const f = await fixture(t);
-  const fields = { ...config, name: '<script>alert(1)</script> "&', model: '<img src=x onerror=alert(2)> "&' };
+  const fields = { ...config, type: 'llm', name: '<script>alert(1)</script> "&', model: '<img src=x onerror=alert(2)> "&' };
   const record = await saved(await f.post('/settings/api', fields));
   assert.ok(!JSON.stringify(record).includes(secret));
   for (const path of ['/settings', `/settings?config=${record.id}`]) {
@@ -176,45 +179,29 @@ test('保存和连接检查保留跨站、格式和大小限制，不能公开�
   for (const path of ['/data/drama.sqlite', '/.env', '/src/settings.js']) assert.equal((await f.get(path)).status, 404);
 });
 
-test('按配置 ID 和所填模型实际 POST 聊天或单图生成，返回真实结果；不读 /models、不修改配置', async t => {
-  const f = await fixture(t);
-  const requests = [];
-  let imageResult = { b64_json: png };
+test('按配置 ID 和所填模型实际 POST 独立聊天，安全返回文本；不读 /models、不修改配置', async t => {
+  const f = await fixture(t), requests = [];
   const provider = await listen(t, createServer(async (request, response) => {
-    const chunks = [];
-    for await (const chunk of request) chunks.push(chunk);
-    const body = JSON.parse(Buffer.concat(chunks).toString());
-    requests.push({ method: request.method, path: request.url, authorization: request.headers.authorization, body });
+    const chunks = []; for await (const chunk of request) chunks.push(chunk);
+    requests.push({ method: request.method, path: request.url, authorization: request.headers.authorization, body: JSON.parse(Buffer.concat(chunks)) });
     response.writeHead(200, { 'Content-Type': 'application/json' });
-    response.end(JSON.stringify(request.url.endsWith('/chat/completions') ? { choices: [{ message: { content: `OK ${secret}` } }] } : { data: [imageResult] }));
+    response.end(JSON.stringify({ choices: [{ message: { content: `OK ${secret}` } }] }));
   }));
-  const first = await saved(await f.post('/settings/api', { ...config, type: 'llm', model: 'my-text-model', baseUrl: `${provider.url}/proxy/v1` }));
-  const second = await saved(await f.post('/settings/api', { ...config, name: '图片接口', baseUrl: `${provider.url}/proxy/v1`, apiKey: 'second-key', model: 'second-model' }));
-  const original = f.database.prepare('SELECT * FROM api_configs ORDER BY id').all();
-  const text = await saved(await f.post(`/settings/api/${first.id}/check`, { ...testFields(first), apiKey: 'ignored-key' }), 200);
-  assert.equal(text.verified, true);
-  assert.equal(text.kind, 'text');
-  assert.match(text.text, /^OK/);
+  const record = await saved(await f.post('/settings/api', { ...config, type: 'llm', model: 'my-text-model', baseUrl: `${provider.url}/proxy/v1` }));
+  const original = f.database.prepare('SELECT * FROM api_configs').get();
+  const text = await saved(await f.post(`/settings/api/${record.id}/check`, testFields(record)), 200);
+  assert.equal(text.verified, true); assert.equal(text.kind, 'text'); assert.match(text.text, /^OK/);
   assert.ok(!JSON.stringify(text).includes(secret));
-  const image = await saved(await f.post(`/settings/api/${second.id}/check`, testFields(second)), 200);
-  assert.equal(image.kind, 'image');
-  assert.equal(image.image, `data:image/png;base64,${png}`);
-  imageResult = { url: 'https://image.example.test/result.png' };
-  const urlImage = await saved(await f.post(`/settings/api/${second.id}/check`, testFields(second)), 200);
-  assert.equal(urlImage.image, imageResult.url);
-  assert.deepEqual(requests, [
-    { method: 'POST', path: '/proxy/v1/chat/completions', authorization: `Bearer ${secret}`, body: { model: 'my-text-model', messages: [{ role: 'user', content: 'Reply only with OK.' }], max_tokens: 16, stream: false } },
-    { method: 'POST', path: '/proxy/v1/images/generations', authorization: 'Bearer second-key', body: { model: 'second-model', prompt: 'A single blue ceramic mug with a handle on a wooden table, soft natural light, realistic product photography. No text, logos, symbols, flags or people.', n: 1, size: '1024x1024' } },
-    { method: 'POST', path: '/proxy/v1/images/generations', authorization: 'Bearer second-key', body: { model: 'second-model', prompt: 'A single blue ceramic mug with a handle on a wooden table, soft natural light, realistic product photography. No text, logos, symbols, flags or people.', n: 1, size: '1024x1024' } },
-  ]);
-  assert.deepEqual(f.database.prepare('SELECT * FROM api_configs ORDER BY id').all(), original);
+  assert.deepEqual(requests, [{ method: 'POST', path: '/proxy/v1/chat/completions', authorization: `Bearer ${secret}`, body: { model: 'my-text-model', messages: [{ role: 'user', content: 'Reply only with OK.' }], max_tokens: 16, stream: false } }]);
+  assert.deepEqual(f.database.prepare('SELECT * FROM api_configs').get(), original);
+  assert.equal(f.database.prepare('SELECT count(*) AS n FROM api_protocols').get().n, 0);
 });
 
 test('旧页面和未确认计费的请求不能偷偷调用模型，配置在其他页面改变或参数重复时拒绝', async t => {
   const f = await fixture(t);
   let calls = 0;
   const provider = await listen(t, createServer((request, response) => { calls++; response.end('{}'); }));
-  const record = await saved(await f.post('/settings/api', { ...config, baseUrl: provider.url }));
+  const record = await saved(await f.post('/settings/api', { ...config, baseUrl: `${provider.url}/v1` }));
   const path = `/settings/api/${record.id}/check`;
   for (const fields of [{}, { ...testFields(record), chargeConfirmed: 'no' }]) assert.equal((await f.post(path, fields)).status, 400);
   for (const key of ['type', 'model', 'baseUrl']) {
@@ -229,47 +216,25 @@ test('旧页面和未确认计费的请求不能偷偷调用模型，配置在�
   assert.equal(calls, 0);
 });
 
-test('图生图和编辑必须上传真实参考图，按 /images/edits multipart 请求各自模型，不回退普通生图', async t => {
-  const f = await fixture(t);
-  const requests = [];
-  const provider = await listen(t, createServer(async (request, response) => {
-    const chunks = [];
-    for await (const chunk of request) chunks.push(chunk);
-    const body = await new Response(Buffer.concat(chunks), { headers: { 'Content-Type': request.headers['content-type'] } }).formData();
-    requests.push({ method: request.method, path: request.url, authorization: request.headers.authorization, model: body.get('model'), n: body.get('n'), prompt: body.get('prompt'), bytes: Buffer.from(await body.get('image').arrayBuffer()) });
-    response.writeHead(200, { 'Content-Type': 'application/json' });
-    response.end(JSON.stringify({ data: [{ b64_json: png }] }));
-  }));
-  for (const type of ['image_to_image', 'image_edit']) {
-    const record = await saved(await f.post('/settings/api', { ...config, type, model: `${type}-model`, baseUrl: `${provider.url}/v1` }));
-    const path = `/settings/api/${record.id}/check`;
-    assert.equal((await f.post(path, testFields(record))).status, 400);
-    const body = new FormData();
-    for (const [key, value] of Object.entries(testFields(record))) body.set(key, value);
-    body.set('referenceImage', new Blob(['not a picture'], { type: 'image/png' }), 'fake.png');
-    assert.equal((await f.post(path, {}, { body })).status, 400);
-    body.set('referenceImage', new Blob([Buffer.alloc(5 * 1024 * 1024 + 1)], { type: 'image/png' }), 'big.png');
-    assert.equal((await f.post(path, {}, { body })).status, 413);
-    body.set('referenceImage', new Blob([Buffer.from(png, 'base64')], { type: 'text/plain' }), 'source.txt');
-    const result = await saved(await f.post(path, {}, { body }), 200);
-    assert.equal(result.kind, 'image');
-    assert.equal(result.image, `data:image/png;base64,${png}`);
-    assert.equal(requests.at(-1).model, `${type}-model`);
-    assert.equal(requests.at(-1).path, '/v1/images/edits');
-    assert.equal(requests.at(-1).method, 'POST');
-    assert.equal(requests.at(-1).authorization, `Bearer ${secret}`);
-    assert.equal(requests.at(-1).n, '1');
-    assert.deepEqual(requests.at(-1).bytes, Buffer.from(png, 'base64'));
-    assert.match(requests.at(-1).prompt, type === 'image_edit' ? /Change the background/ : /watercolor/);
-    assert.equal((await f.post(path, {}, { headers: { 'Content-Type': 'multipart/form-data' }, body: 'broken' })).status, 400);
-    body.set('referenceImage', new Blob([Buffer.alloc(6 * 1024 * 1024 + 1)]), 'too-large.png');
-    assert.equal((await f.post(path, {}, { body })).status, 413);
-    assert.equal((await f.post(path, {}, { headers: { Origin: 'https://other.example' }, body: new FormData() })).status, 403);
-  }
-  assert.equal(requests.length, 2);
+test('图生图必须上传真实参考文件，坏 multipart、旧字段、伪图片和跨站拒绝不产生请求', async t => {
+  const f = await fixture(t); let calls = 0;
+  const provider = await listen(t, createServer((_request, response) => { calls++; response.end('{}'); }));
+  const record = await saved(await f.post('/settings/api', { ...config, type: 'image_to_image', baseUrl: `${provider.url}/v1` }));
+  const path = `/settings/api/${record.id}/check`;
+  assert.equal((await f.post(path, testFields(record))).status, 400);
+  const body = new FormData(); for (const [key,value] of Object.entries(testFields(record))) body.set(key,value);
+  body.set('referenceImages', new Blob(['not a picture'], {type:'image/png'}), 'fake.png');
+  assert.equal((await f.post(path, {}, {body})).status, 400);
+  body.set('referenceImages', new Blob([Buffer.from(png,'base64')], {type:'text/plain'}), 'wrong.txt');
+  assert.equal((await f.post(path, {}, {body})).status, 400);
+  body.delete('referenceImages'); body.set('referenceImage',new Blob([Buffer.from(png,'base64')],{type:'image/png'}),'old.png');
+  assert.equal((await f.post(path, {}, {body})).status, 400);
+  assert.equal((await f.post(path, {}, {headers:{'Content-Type':'multipart/form-data'},body:'broken'})).status,400);
+  assert.equal((await f.post(path, {}, {headers:{Origin:'https://other.example'},body:new FormData()})).status,403);
+  assert.equal(calls,0); assert.equal(f.database.prepare('SELECT count(*) AS n FROM generation_operations').get().n,0);
 });
 
-test('任何失败状态、假模型列表、空文本、无图片及异步任务 ID 都不算模型测试成功，错误不回显密钥', async t => {
+test('聊天失败、假模型列表、空文本、图片载荷及异步任务 ID 都不算测试成功，错误不回显密钥', async t => {
   const f = await fixture(t);
   let status = 200;
   let raw = '';
@@ -279,7 +244,7 @@ test('任何失败状态、假模型列表、空文本、无图片及异步任�
     response.writeHead(status, { 'Content-Type': 'application/json' });
     response.end(raw);
   }));
-  const record = await saved(await f.post('/settings/api', { ...config, baseUrl: `${provider.url}/v1` }));
+  const record = await saved(await f.post('/settings/api', { ...config, type: 'llm', baseUrl: `${provider.url}/v1` }));
   const path = `/settings/api/${record.id}/check`;
   for (status of [400, 401, 403, 404, 405, 429, 500, 501]) {
     raw = JSON.stringify({ error: { message: `provider error ${secret}` } });
@@ -312,7 +277,7 @@ test('实际模型请求不跟随重定向泄露密钥，网络失败也不自�
     response.writeHead(302, { Location: `${destination.url}/images/generations` });
     response.end();
   }));
-  const record = await saved(await f.post('/settings/api', { ...config, baseUrl: source.url }));
+  const record = await saved(await f.post('/settings/api', { ...config, type: 'llm', baseUrl: source.url }));
   assert.equal((await f.post(`/settings/api/${record.id}/check`, testFields(record))).status, 502);
   assert.equal(sourceCalls, 1);
   assert.equal(destinationCalls, 0);
@@ -330,14 +295,14 @@ test('配置卡片与 ID 在重启后保留，重复类型不覆盖，原角色�
     const first = await fixture(t, filename);
     first.database.exec("INSERT INTO projects VALUES (1, '原项目', '写实电影', '9:16'); INSERT INTO seasons VALUES (1, 1, '原季', 1); INSERT INTO characters (project_id, name, age) VALUES (1, '原角色', 28)");
     const records = [];
-    for (const [type, label] of apiTypes) records.push(await saved(await first.post('/settings/api', { ...config, type, ...(type === 'video' ? { protocol: 'ironweave2', model: 'ironweave' } : {}), name: label, model: type === 'video' ? 'ironweave' : `${type}-model` })));
+    for (const [type, label] of apiTypes) records.push(await saved(await first.post('/settings/api', { ...config, type, ...(type === 'video' ? { protocol: 'ironweave2', model: 'ironweave' } : {}), name: label, model: type === 'llm' ? 'chat-model' : 'ironweave' })));
     records.push(await saved(await first.post('/settings/api', { ...config, name: '另一条文生图' })));
     await first.close();
     const second = await fixture(t, filename);
-    assert.equal(second.database.prepare('SELECT count(*) AS count FROM api_configs').get().count, 6);
+    assert.equal(second.database.prepare('SELECT count(*) AS count FROM api_configs').get().count, 5);
     assert.equal(second.database.prepare('SELECT name FROM characters').get().name, '原角色');
     const list = await (await second.get('/settings')).text();
-    assert.equal((list.match(/class="project-card api-config-card"/g) ?? []).length, 6);
+    assert.equal((list.match(/class="project-card api-config-card"/g) ?? []).length, 5);
     for (const record of records) {
       const html = await (await second.get(`/settings?config=${record.id}`)).text();
       assert.ok(!html.includes(secret));
@@ -347,4 +312,45 @@ test('配置卡片与 ID 在重启后保留，重复类型不覆盖，原角色�
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+
+test('旧遮罩卡片只读停用，记录及密钥保留、不新建不测试不暗改类型', async t => {
+  const f=await fixture(t);
+  f.database.prepare("INSERT INTO api_configs(name,type,base_url,api_key,model) VALUES(?,'image_edit',?,?,?)").run('旧遮罩',config.baseUrl,secret,'old-mask');
+  const before=f.database.prepare('SELECT * FROM api_configs').get();
+  const list=await (await f.get('/settings')).text(); assert.match(list,/遮罩编辑配置（已停用）/); assert.doesNotMatch(list,/undefined/);
+  const detail=await (await f.get(`/settings?config=${before.id}`)).text(); assert.match(detail,/原记录和历史作品保留/); assert.match(detail,/old-mask/); assert.doesNotMatch(detail,/id="api-config-form"|id="check-api-connection"/); assert.ok(!detail.includes(secret));
+  const filtered=await (await f.get('/settings?type=image_edit')).text(); assert.doesNotMatch(filtered,/href="[^"]*new=1/);
+  assert.equal((await f.get('/settings?new=1&type=image_edit')).status,400);
+  assert.equal((await f.post('/settings/api',{...config,type:'image_edit'})).status,400);
+  assert.equal((await f.post(`/settings/api/${before.id}`,{...config,type:'image_to_image'})).status,400);
+  assert.equal((await f.post(`/settings/api/${before.id}/check`,{...testFields({...config,type:'image_edit',model:'old-mask'})})).status,400);
+  assert.deepEqual(f.database.prepare('SELECT * FROM api_configs').get(),before);
+});
+
+
+test('设置测试 multipart 单独允许超过旧 6 MiB 上限，但合计超过 32 MiB 不会创建操作', async t => {
+  const f=await fixture(t), record=await saved(await f.post('/settings/api',{...config,type:'image_to_image'}));
+  const body=new FormData(); for(const [key,value] of Object.entries(testFields(record))) body.set(key,value);
+  body.set('referenceImages',new Blob([Buffer.alloc(6*1024*1024+1)],{type:'image/png'}),'bad.png');
+  const path=`/settings/api/${record.id}/check`;
+  assert.equal((await f.post(path,{}, {body})).status,400);
+  body.set('referenceImages',new Blob([Buffer.alloc(32*1024*1024+1)],{type:'image/png'}),'large.png');
+  assert.equal((await f.post(path,{}, {body})).status,413);
+  assert.equal(f.database.prepare('SELECT count(*) AS n FROM generation_operations').get().n,0);
+});
+
+test('已保存视频参数实际详情页可渲染数字 frames/fps 和五图测试入口', async t => {
+  const f=await fixture(t);
+  const record=await saved(await f.post('/settings/api',{...config,type:'video',videoProfiles:JSON.stringify([{size:'1024x576',frames:124,fps:24}])}));
+  const response=await f.get(`/settings?config=${record.id}`);
+  assert.equal(response.status,200);
+  const html=await response.text();
+  assert.match(html,/<option value="0">1024x576 · 124 帧 · 24 fps<\/option>/);
+  assert.match(html,/<div id="api-test-reference" >/);
+  assert.match(html,/name="referenceImages" type="file" multiple/);
+  assert.match(html,/<div id="api-test-video" >/);
+  assert.match(html,/href="\/operations"/);
+  assert.ok(!html.includes(secret));
 });

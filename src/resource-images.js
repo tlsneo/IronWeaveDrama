@@ -2,19 +2,16 @@ import { generateOperation } from './generation-operations.js';
 import { createHash } from 'node:crypto';
 import { characterFields } from './characters.js';
 import { readApiConfig } from './settings.js';
-import { callModel, readImageResult } from './model-client.js';
-import { loadImage, imageDetails } from './images.js';
+import { imageDetails } from './images.js';
 import { baseCharacterBoard } from '../prompts/character/base-board.js';
 import { referenceCharacterBoard } from '../prompts/character/reference-board.js';
 import { sceneImagePrompt } from '../prompts/scene/reference-image.js';
 
 const kinds = {
-  character: { table: 'characters', images: 'character_boards', references: 'character_references', column: 'character_id', label: '角色', imageLabel: '角色板' },
-  scene: { table: 'scenes', images: 'scene_images', references: 'scene_references', column: 'scene_id', label: '场景', imageLabel: '场景参考图' },
+  character: { table: 'characters', images: 'character_boards', references: 'character_references', column: 'character_id', label: '角色' },
+  scene: { table: 'scenes', images: 'scene_images', references: 'scene_references', column: 'scene_id', label: '场景' },
 };
-export const imageSizes = { '16:9': '2560x1440', '9:16': '1440x2560', '21:9': '2688x1152', '4:3': '2048x1536', '3:4': '1536x2048', '1:1': '2048x2048' };
 export function requestedImageSize(config, form, ratio) {
-  if (!form.has('size') && config.protocol !== 'ironweave2') return imageSizes[ratio];
   const size = form.get('size');
   if (form.getAll('size').length !== 1 || typeof size !== 'string' || !/^[1-9]\d*x[1-9]\d*$/.test(size)) reject(400, '请填写本次输出尺寸，格式为规范正整数宽x高，且不能重复。');
   const [width, height] = size.split('x').map(Number);
@@ -105,29 +102,10 @@ export async function generateResourceImage(kind, database, projectId, id, form)
       body = new FormData(); body.set('model', config.model); body.set('prompt', prompt); body.set('n', '1'); body.set('size', size);
       body.set('image', new Blob([source.image], { type: reference.mime }), `reference.${reference.mime === 'image/jpeg' ? 'jpg' : reference.mime.split('/')[1]}`);
     }
-    if (config.protocol === 'ironweave2') {
-      const operation = await generateOperation(database, { projectId, kind, targetId: id, config,
-        source: { revision, referenceId: reference?.id ?? null, model: config.model, prompt, ratio },
-        endpoint: reference ? '/images/edits' : '/images/generations', body, expected: { size } });
-      return { valid: false, operation, imageUrl: operation.mediaUrl, width: operation.metadata.width, height: operation.metadata.height,
-        message: `媒体已保存，${operation.deliveryConfirmed ? '交付已确认' : '交付确认未确定'}；请在操作历史检查后人工采用，尚未替换当前图片。` };
-    }
-    const response = await callModel(config, reference ? '/images/edits' : '/images/generations', body);
-    const bytes = await loadImage(readImageResult(config, response), config.baseUrl);
-    const { mime, width, height } = imageDetails(bytes);
-    const current = find(kind, database, projectId, id);
-    const currentProject = database.prepare('SELECT style, aspect_ratio FROM projects WHERE id = ?').get(projectId);
-    const unchanged = resourceRevision(kind, current, currentProject) === revision && (readResourceReference(kind, database, id)?.id ?? null) === (reference?.id ?? null);
-    const [w, h] = ratio.split(':').map(Number); const valid = width * h === height * w && unchanged;
-    let imageId;
-    try {
-      imageId = Number(database.prepare(`INSERT INTO ${d.images} (${d.column}, image, mime, width, height, valid, revision, model, prompt, reference_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(id, bytes, mime, width, height, Number(valid), revision, config.model, prompt, reference?.id ?? null).lastInsertRowid);
-    } catch {
-      throw Object.assign(new Error(`图片已生成但未能保存，原${d.imageLabel}不变。请下载本次图片，避免丢失付费结果。`), { status: 502, recoveryImage: `data:${mime};base64,${bytes.toString('base64')}` });
-    }
-    return { valid, imageUrl: resourceImageUrl(kind, projectId, id, imageId), width, height,
-      message: valid ? kind === 'character' ? '基础角色板已生成并保存，请检查四视图及人物一致性。' : '场景参考图已生成并保存，请检查环境布局与一致性。'
-        : !unchanged ? `生成期间${d.label}资料或参考图发生变化；本次图片已保存供查看，但未替换原${d.imageLabel}。`
-          : `接口返回 ${width} × ${height}，不符合${kind === 'character' ? '固定' : '项目'} ${ratio}；本次图片已保存供查看，但未替换原${d.imageLabel}。` };
+    const operation = await generateOperation(database, { projectId, kind, targetId: id, config,
+      source: { revision, referenceId: reference?.id ?? null, model: config.model, prompt, ratio },
+      endpoint: reference ? '/images/edits' : '/images/generations', body, expected: { size } });
+    return { valid: false, operation, imageUrl: operation.mediaUrl, width: operation.metadata.width, height: operation.metadata.height,
+      message: `${operation.error || (operation.deliveryConfirmed ? '媒体已保存，交付已确认。' : '媒体已保存，交付确认未确定。')}请在操作历史检查后人工采用，尚未替换当前图片。` };
   } finally { active.delete(key); }
 }

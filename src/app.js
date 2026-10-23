@@ -58,7 +58,7 @@ for (const [path, type] of [
   assets.set(path, { type, file: new URL(`../public${path}`, import.meta.url) });
 }
 
-async function readForm(request, maxBytes = 8192, allowMultipart = false) {
+async function readForm(request, maxBytes = 8192, allowMultipart = false, multipartLimit = 6 * 1024 * 1024) {
   const reject = (status, message) => {
     request.resume();
     throw Object.assign(new Error(message), { status });
@@ -69,7 +69,7 @@ async function readForm(request, maxBytes = 8192, allowMultipart = false) {
   const contentType = request.headers['content-type'];
   const multipart = allowMultipart && contentType?.split(';')[0].trim() === 'multipart/form-data';
   if (!multipart && contentType?.split(';')[0].trim() !== 'application/x-www-form-urlencoded') reject(415, '不支持的提交格式。');
-  if (multipart) maxBytes = 6 * 1024 * 1024;
+  if (multipart) maxBytes = multipartLimit;
   let size = 0;
   const chunks = [];
   for await (const chunk of request.iterator({ destroyOnReturn: false })) {
@@ -206,7 +206,7 @@ export function createApp(database) {
         const form = await readForm(request, action ? 32768 : kind === 'looks' ? 256 * 1024 : 65536, action === 'reference-image');
         if (action === 'edit-image') {
           findLook(database, projectId, id);
-          json(503, { error: '遮罩修图接口尚未接入，不会调用模型或回退为整图编辑。' }); return;
+          json(503, { error: 'Weave 不支持遮罩修图；此入口已停用，不会调用模型或回退为整图编辑。' }); return;
         }
         const result = !action ? kind === 'looks' ? saveLook(database, projectId, id, form) : saveProductionAsset(database, projectId, kind, id, form)
           : action === 'reference-image' ? await saveAssetReference(database, projectId, kind, id, form)
@@ -264,7 +264,7 @@ export function createApp(database) {
         if (![projectId, id].every(Number.isSafeInteger)) { json(404, { error: '资源不存在' }); return; }
         if (generationRoute[4] === 'edit-image') {
           (scene ? findScene : findCharacter)(database, projectId, id);
-          json(503, { error: '遮罩修图接口尚未接入，不会调用模型或回退为整图编辑。' });
+          json(503, { error: 'Weave 不支持遮罩修图；此入口已停用，不会调用模型或回退为整图编辑。' });
           return;
         }
         json(200, generationRoute[4] === 'clear-image' ? (scene ? clearSceneImage : clearCharacterBoard)(database, projectId, id, form)
@@ -272,7 +272,7 @@ export function createApp(database) {
         return;
       }
       if (settingsRoute && request.method === 'POST') {
-        const form = await readForm(request, 32768, Boolean(settingsRoute[2]));
+        const form = await readForm(request, 32768, Boolean(settingsRoute[2]), 65 * 1024 * 1024);
         const id = settingsRoute[1] ? Number(settingsRoute[1]) : undefined;
         if (id !== undefined && !Number.isSafeInteger(id)) {
           json(404, { error: 'API 配置不存在' });

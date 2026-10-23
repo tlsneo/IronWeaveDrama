@@ -1,51 +1,6 @@
-import { lookup } from 'node:dns/promises';
-import { isIP, BlockList } from 'node:net';
-import { get as httpGet } from 'node:http';
-import { get as httpsGet } from 'node:https';
 import { imageMime } from './model-client.js';
 
 function reject(message) { throw Object.assign(new Error(message), { status: 502 }); }
-
-const privateNetworks = new BlockList();
-for (const [address, prefix] of [['0.0.0.0', 8], ['10.0.0.0', 8], ['127.0.0.0', 8], ['169.254.0.0', 16], ['172.16.0.0', 12], ['192.168.0.0', 16], ['100.64.0.0', 10], ['198.18.0.0', 15], ['224.0.0.0', 3]]) privateNetworks.addSubnet(address, prefix, 'ipv4');
-for (const [address, prefix] of [['::', 128], ['::1', 128], ['fc00::', 7], ['fe80::', 10], ['ff00::', 8], ['::ffff:0:0', 96], ['::', 96]]) privateNetworks.addSubnet(address, prefix, 'ipv6');
-
-export async function loadImage(source, baseUrl) {
-  if (source.startsWith('data:')) return Buffer.from(source.slice(source.indexOf(',') + 1), 'base64');
-  const url = new URL(source);
-  const hostname = url.hostname.replace(/^\[|\]$/g, '');
-  let addresses;
-  try { addresses = isIP(hostname) ? [{ address: hostname, family: isIP(hostname) }] : await lookup(hostname, { all: true }); }
-  catch { reject('图片地址无法解析；生成请求可能已计费，没有自动重试。'); }
-  const sameOrigin = url.origin === new URL(baseUrl).origin;
-  if (!addresses.length || (!sameOrigin && addresses.some(item => privateNetworks.check(item.address, item.family === 6 ? 'ipv6' : 'ipv4')))) reject('图片地址指向未配置的内网地址，已拒绝下载。');
-  // 连接固定到已检查的地址，防止二次 DNS 解析绕过内网检查。
-  return new Promise((resolve, rejectPromise) => {
-    const request = (url.protocol === 'https:' ? httpsGet : httpGet)(url, {
-      lookup: (_hostname, options, callback) => options.all ? callback(null, addresses) : callback(null, addresses[0].address, addresses[0].family),
-    }, response => {
-      if (response.statusCode !== 200) {
-        response.resume();
-        request.destroy(new Error('image request failed'));
-        return;
-      }
-      let size = 0;
-      const chunks = [];
-      response.on('data', chunk => {
-        size += chunk.length;
-        if (size > 32 * 1024 * 1024) request.destroy(new Error('image too large'));
-        else chunks.push(chunk);
-      });
-      response.on('end', () => { clearTimeout(timer); resolve(Buffer.concat(chunks)); });
-      response.on('error', error => request.destroy(error));
-    });
-    const timer = setTimeout(() => request.destroy(new Error('image timeout')), 60000);
-    request.on('error', () => {
-      clearTimeout(timer);
-      rejectPromise(Object.assign(new Error('图片下载失败、超时或超过 32 MiB；原角色板不变，生成请求可能已计费，没有自动重试。'), { status: 502 }));
-    });
-  });
-}
 
 export function imageDetails(bytes) {
   const mime = imageMime(bytes);

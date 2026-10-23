@@ -4,7 +4,6 @@ import { escapeHtml, deleteButton } from './html.js';
 import { baseCharacterBoard } from '../prompts/character/base-board.js';
 import { characterRevision, characterBoardUrl, readCharacterReference } from './character-images.js';
 import { renderResourceAppearances } from './render-episode-resources.js';
-import { renderImageDialog } from './render-image-dialog.js';
 
 function renderField(field, character) {
   const value = escapeHtml(String(character[field.column] ?? ''));
@@ -31,7 +30,6 @@ export async function renderCharacters(database, projectId, project, query) {
     const apiName = reference ? '图生图' : '文生图';
     const referenceUrl = reference ? `/projects/${projectId}/characters/${id}/references/${reference.id}` : '';
     const configs = database.prepare('SELECT id, name, model, base_url AS baseUrl FROM api_configs WHERE type = ? ORDER BY id').all(apiType);
-    const editConfigs = database.prepare("SELECT id, name, model, base_url AS baseUrl FROM api_configs WHERE type = 'image_edit' ORDER BY id").all();
     const adult = Number.isSafeInteger(character.age) && character.age >= 18;
     const content = `<div class="character-editor">
       <form id="character-form" data-url="/projects/${projectId}/characters/${id}" aria-label="角色基础外观">
@@ -57,17 +55,16 @@ export async function renderCharacters(database, projectId, project, query) {
           <div class="form-field"><label for="character-image-api">${apiName} API</label><select id="character-image-api" name="apiConfigId" required>${configs.length !== 1 ? `<option value="">选择${apiName}配置</option>` : ''}${configs.map(config => `<option value="${config.id}" data-model="${escapeHtml(config.model)}" data-base-url="${escapeHtml(config.baseUrl)}">${escapeHtml(config.name)} · ${escapeHtml(config.model)}</option>`).join('')}</select></div>
           <div class="character-image-actions">
             <button id="generate-character-image" class="create-button" type="button" ${adult && configs.length ? '' : 'disabled'}>生成图片</button>
-            <button id="edit-character-image" class="theme-toggle" type="button" aria-controls="character-image-edit-dialog" aria-haspopup="dialog" ${latest ? '' : 'disabled'}>AI修图</button>
             <button id="clear-character-image" class="theme-toggle" type="button" ${latest ? '' : 'disabled'}>清空图像</button>
           </div>
           ${!configs.length ? `<p class="field-help">尚无${apiName}配置，请先到<a href="/settings?type=${apiType}">设置</a>添加。</p>` : ''}
+          <p class="field-help">Weave 不支持遮罩修图；历史图片仍可查看和采用。</p>
           <p id="character-generation-error" class="form-error" role="alert"></p>
           <p id="character-generation-status" class="field-help" role="status" aria-live="polite">${board && (board.revision !== revision || board.reference_id !== (reference?.id ?? null)) ? '现有图片对应旧资料或参考图；修改后不会自动重新生成。' : ''}</p>
         </form>
       </aside>
     </div>
-    ${renderResourceAppearances(database, projectId, 'character', id, query)}
-    ${renderImageDialog(editConfigs)}`;
+    ${renderResourceAppearances(database, projectId, 'character', id, query)}`;
     return { title: character.name, description: '全剧共用 · 只记录人物本身的外观，服饰、配饰、鞋履、武器与道具单独制作。', actions: '', content };
   }
 

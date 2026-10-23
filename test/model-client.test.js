@@ -100,13 +100,13 @@ test('取消等待限制不取消32MiB响应边界；解压后超量和损坏压
   assert.equal(f.requests.length, 2);
 });
 
-test('显式API测试等待时长与图片默认180秒保留，不影响正式LLM生成的无限制等待', async t => {
+test('显式聊天测试可设置等待边界，图片调用在联网前拒绝', async t => {
   const f = await provider(t, response => response.end(JSON.stringify(result)));
   const timeouts = [], originalTimeout = AbortSignal.timeout;
   t.mock.method(AbortSignal, 'timeout', milliseconds => { timeouts.push(milliseconds); return originalTimeout(milliseconds); });
   assert.equal(readTextResult(await callModel(f.config, '/chat/completions', body, 60000)), '完整结果');
-  assert.deepEqual(await callModel({ ...f.config, type: 'text_to_image' }, '/images/generations', body), result);
-  assert.deepEqual(timeouts, [60000, 180000]); assert.equal(f.requests.length, 2);
+  await assert.rejects(callModel({ ...f.config, type: 'text_to_image' }, '/images/generations', body), /仅支持.*聊天/);
+  assert.deepEqual(timeouts, [60000]); assert.equal(f.requests.length, 1);
 });
 
 test('显式受限测试仍会终止等待，无自动重试；不会把这种边界套到正式LLM生成', async t => {
@@ -115,15 +115,11 @@ test('显式受限测试仍会终止等待，无自动重试；不会把这种�
   assert.ok(f.requests.length <= 1);
 });
 
-test('旧协议显式无限等待的 FormData 仍正确编码，不把表单对象直接写入原生请求', async t => {
-  const { Readable } = await import('node:stream');
-  let fields;
-  const server = createServer(async (request, response) => {
-    fields = await new Request('http://127.0.0.1', { method: 'POST', headers: request.headers, body: Readable.toWeb(request), duplex: 'half' }).formData();
-    response.end(JSON.stringify({ data: [{ b64_json: 'fixture' }] }));
-  });
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)));
-  const body = new FormData(); body.set('prompt', '保持原文'); body.append('image[]', new Blob(['first']), 'first.png'); body.append('image[]', new Blob(['second']), 'second.png');
-  const result = await callModel({ type: 'image_to_image', baseUrl: `http://127.0.0.1:${server.address().port}`, apiKey: 'synthetic' }, '/images/edits', body, null);
-  assert.equal(result.data.length, 1); assert.equal(fields.get('prompt'), '保持原文'); assert.deepEqual(await Promise.all(fields.getAll('image[]').map(file => file.text())), ['first', 'second']);
+test('聊天客户端拒绝所有图片端点与FormData，不产生旧同步生成请求', async t => {
+  const f = await provider(t, response => response.end(JSON.stringify(result)));
+  for (const endpoint of ['/images/generations', '/images/edits', '/videos/generations']) {
+    await assert.rejects(callModel(f.config, endpoint, body), /仅支持.*聊天/);
+  }
+  await assert.rejects(callModel(f.config, '/chat/completions', new FormData()), /仅支持.*聊天/);
+  assert.equal(f.requests.length, 0);
 });

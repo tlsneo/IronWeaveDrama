@@ -135,11 +135,8 @@ test('SSR 定妆：项目内选择、同名带 ID、可存空演员、多件素�
   assert.match(css, /production-preview-image[^}]*aspect-ratio: auto/);
   assert.match(result.content, /固定横向16:9/);
   assert.match(result.content, /id="look-board-image"[^>]*src="\/projects\/7\/looks\/1\/images\/501"/);
-  assert.match(result.content, /id="edit-look-image"[^>]*>AI修图/);
-  assert.match(result.content, /id="look-image-edit-dialog"[^>]*data-kind="look"/);
-  assert.match(result.content, /id="look-edit-api"[\s\S]*value="24">编辑图片 · masked-model/);
-  assert.match(result.content, /id="submit-look-edit"[^>]*disabled/);
-  assert.match(result.content, /遮罩接口待接入，当前不会调用模型/);
+  assert.doesNotMatch(result.content, /id="edit-look-image"|look-image-edit-dialog|look-edit-api|submit-look-edit/);
+  assert.match(result.content, /Weave 不支持遮罩修图/);
 });
 
 test('SSR 缺演员/素材图片禁用生成，但可保存草稿；当前依据相符时不标旧图，历史只列最近 20 张', t => {
@@ -151,7 +148,7 @@ test('SSR 缺演员/素材图片禁用生成，但可保存草稿；当前依据
   assert.match(draft, /id="look-generate"[^>]*disabled/);
   assert.match(draft, /<button class="create-button" type="submit">保存资料/);
   assert.match(draft, /id="look-clear-image"[^>]*disabled/);
-  assert.match(draft, /id="edit-look-image"[^>]*disabled/);
+  assert.doesNotMatch(draft, /id="edit-look-image"/);
   assert.doesNotMatch(draft, /id="look-board-image"/);
   db.testInputs.missing = [];
   sqlite.prepare('UPDATE look_images SET revision = ? WHERE id = 501').run('input-current');

@@ -19,19 +19,32 @@ async function fixture(t) {
   const meta = { mime_type: 'image/png', bytes: data.length, sha256: createHash('sha256').update(data).digest('hex'), width: 16, height: 9, delivery_ready_at: new Date().toISOString(), delivery_timeout_ms: 1800000 };
   meta.delivery_expires_at = new Date(Date.parse(meta.delivery_ready_at) + 1800000).toISOString();
   const stats = { post: 0, ack: 0, get: 0 }, control = { truncate: false, ackLost: false, acceptedLost: false, boundaryCollision: false };
+  function errorResponse(res, error) {
+    res.writeHead(error.status, { 'Content-Type': error.type ?? 'application/json', ...(error.truncate ? { 'Content-Length': 1000 } : {}) });
+    res.write(error.body ?? JSON.stringify({ error: { code: error.code, message: 'private upstream message must not escape' } }));
+    if (error.truncate) setTimeout(() => res.destroy(), 10); else res.end();
+  }
   const server = createServer(async (req, res) => {
-    for await (const _ of req) {}
+    assert.ok(req.url.startsWith(control.legacyPaths ? '/tasks/' : '/v1/'));
+    const chunks = []; for await (const chunk of req) chunks.push(chunk);
     if (req.url.endsWith('/ack')) {
       stats.ack++;
+      assert.deepEqual(JSON.parse(Buffer.concat(chunks)), { bytes: meta.bytes, sha256: meta.sha256 });
+
       const row = db.prepare('SELECT * FROM generation_operations WHERE task_id=?').get(task);
       assert.ok(['saved', 'confirmed'].includes(row.local_state)); assert.deepEqual(await readFile(mediaPath(row.id, false, directory)), data);
+      if (control.ackError) { errorResponse(res, control.ackError); return; }
       if (control.ackLost) { res.destroy(); return; }
       res.setHeader('Content-Type', 'application/json'); res.end(JSON.stringify({ task_id: task, state: 'succeeded', bytes: meta.bytes, sha256: meta.sha256 })); return;
     }
     if (req.url.endsWith('/output')) {
-      stats.get++; res.writeHead(200, { 'Content-Type': meta.mime_type, 'Content-Length': meta.bytes, 'X-IronWeave-Protocol': '2', 'X-IronWeave-Task-ID': task, 'X-IronWeave-Sha256': meta.sha256, 'X-IronWeave-Delivery-Expires-At': meta.delivery_expires_at, 'Accept-Ranges': 'none' }); res.end(data); return;
+      stats.get++;
+      if (control.getError) { errorResponse(res, control.getError); return; }
+      res.writeHead(200, { 'Content-Type': meta.mime_type, 'Content-Length': meta.bytes, 'X-IronWeave-Protocol': '2', 'X-IronWeave-Task-ID': task, 'X-IronWeave-Sha256': meta.sha256, 'X-IronWeave-Delivery-Expires-At': meta.delivery_expires_at, 'Accept-Ranges': 'none' }); res.end(data); return;
     }
+    assert.equal(req.url, '/v1/images/generations');
     stats.post++;
+    if (control.generationError) { errorResponse(res, control.generationError); return; }
     if (control.acceptedLost) { res.destroy(); return; }
     res.writeHead(200, { 'Content-Type': `multipart/mixed; boundary=${boundary}`, 'X-IronWeave-Protocol': '2' });
     const event = (type, seq, extra) => { const value = Buffer.from(JSON.stringify({ task_id: task, seq, type, state: type === 'accepted' ? 'accepted' : 'delivering', ...extra })); res.write(`--${boundary}\r\nContent-Type: application/json\r\nContent-Length: ${value.length}\r\n\r\n`); res.write(value); res.write('\r\n'); };
@@ -46,11 +59,11 @@ async function fixture(t) {
     else event('output_end', 3, meta); res.end(`--${boundary}--\r\n`);
   });
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve)); t.after(() => new Promise(resolve => server.close(resolve)));
-  db.prepare("INSERT INTO api_configs(name,type,base_url,api_key,model) VALUES('合成','text_to_image',?,'synthetic-key','ironweave')").run(`http://127.0.0.1:${server.address().port}`);
+  db.prepare("INSERT INTO api_configs(name,type,base_url,api_key,model) VALUES('合成','text_to_image',?,'synthetic-key','ironweave')").run(`http://127.0.0.1:${server.address().port}/v1`);
   db.exec("INSERT INTO api_protocols(config_id,protocol) VALUES(1,'ironweave2'); INSERT INTO projects VALUES(1,'隔离项目','水墨','16:9')");
   const config = readApiConfig(db, 1), options = { directory, validate: async (_file, metadata) => { assert.equal(metadata.bytes, data.length); } };
   const generate = () => generateOperation(db, { projectId: 1, kind: 'scene', targetId: 1, config, source: { revision: 'immutable-source' }, endpoint: '/images/generations', body: { model: 'ironweave', prompt: 'synthetic', size: '16x9' }, expected: { size: '16x9' } }, options);
-  return { get db() { return db; }, restartDatabase() { db.close(); db = openDatabase(join(directory, 'test.sqlite')); }, directory, stats, control, options, generate, meta };
+  return { get db() { return db; }, restartDatabase() { db.close(); db = openDatabase(join(directory, 'test.sqlite')); }, directory, stats, control, options, generate, meta, config };
 }
 test('accepted 立刻持久关联，完整发布和 SQLite 关联后才 ACK，正常 EOF 不取消', async t => {
   const f = await fixture(t), seen = [];
@@ -209,4 +222,123 @@ test('A: 已 release 的 accepted 操作正在恢复时不能删项目；项目�
   await assert.rejects(f.generate(), { status: 404 });
   assert.deepEqual(f.stats, { post: 1, ack: 1, get: 1 });
   assert.equal(f.db.prepare('SELECT count(*) AS n FROM generation_operations').get().n, 0);
+});
+
+
+for (const [status, code] of [[400, 'invalid_parameters'], [401, 'unauthorized'], [404, 'workflow_not_found'], [406, 'not_acceptable'], [408, 'upload_idle_timeout'], [409, 'workflow_unavailable'], [413, 'request_too_large'], [415, 'unsupported_media'], [422, 'unsupported_capability']]) {
+  test(`明确生成拒绝 ${status}/${code} 未受理、释放本地锁，只有人工新请求才 POST`, async t => {
+    const f = await fixture(t); f.control.generationError = { status, code };
+    await assert.rejects(f.generate(), error => /未受理/.test(error.message) && error.message.includes(`HTTP ${status}`) && error.message.includes(code));
+    const op = listOperations(f.db, 1)[0];
+    assert.equal(op.localState, 'rejected'); assert.equal(op.taskId, null); assert.equal(op.taskState, null); assert.equal(op.active, false);
+    assert.doesNotMatch(op.error, /private upstream/);
+    assert.deepEqual(f.stats, { post: 1, ack: 0, get: 0 });
+    f.restartDatabase();
+    await assert.rejects(recoverOperation(f.db, 1, op.id, f.options), /未受理/);
+    assert.deepEqual(f.stats, { post: 1, ack: 0, get: 0 });
+    f.control.generationError = null;
+    const next = await f.generate(); assert.notEqual(next.id, op.id); assert.equal(next.deliveryConfirmed, true);
+    assert.deepEqual(f.stats, { post: 2, ack: 1, get: 0 });
+  });
+}
+
+for (const [label, error] of [
+  ['503 提交未知', { status: 503, code: 'commit_unavailable' }],
+  ['HTTP 正文截断', { status: 422, code: 'unsupported_capability', truncate: true }],
+  ['JSON 截断', { status: 422, body: '{"error":{"code":"unsupported_capability"' }],
+  ['非协议 JSON', { status: 422, body: '{"error":{"code":"unsupported_capability"}}' }],
+  ['HTML', { status: 422, code: 'unsupported_capability', type: 'text/html' }],
+  ['未知拒绝码', { status: 422, code: 'unknown_proxy_error' }],
+  ['错误状态码组合', { status: 409, code: 'commit_unavailable' }],
+]) test(`生成 ${label} 仍提交未知、重启后保锁且不自动 POST`, async t => {
+  const f = await fixture(t); f.control.generationError = error;
+  await assert.rejects(f.generate(), /提交结果未知/); f.restartDatabase();
+  const op = listOperations(f.db, 1)[0]; assert.equal(op.localState, 'interrupted'); assert.equal(op.taskId, null); assert.equal(op.active, true);
+  await assert.rejects(f.generate(), { status: 409 }); await assert.rejects(recoverOperation(f.db, 1, op.id, f.options), { status: 409 });
+  assert.deepEqual(f.stats, { post: 1, ack: 0, get: 0 });
+});
+
+for (const [status, code] of [[400, 'invalid_ack'], [401, 'unauthorized'], [404, 'task_not_found'], [409, 'ack_not_ready'], [409, 'receipt_conflict'], [409, 'task_not_acknowledgeable'], [410, 'delivery_expired'], [422, 'receipt_mismatch']]) {
+  test(`ACK 明确 ${status}/${code} 提示已拒绝，文件和固定回执重启后仍可核对`, async t => {
+    const f = await fixture(t); f.control.ackError = { status, code };
+    const op = await f.generate();
+    assert.equal(op.localState, 'saved'); assert.equal(op.deliveryConfirmed, false); assert.equal(op.active, false);
+    assert.equal(op.taskState, code === 'delivery_expired' ? 'failed' : 'delivering');
+    assert.match(op.error, /交付确认已拒绝/); assert.ok(op.error.includes(`HTTP ${status}`)); assert.ok(op.error.includes(code));
+    assert.doesNotMatch(op.error, /未确定|private upstream/);
+    const saved = await readFile(mediaPath(op.id, false, f.directory));
+    assert.deepEqual(f.stats, { post: 1, ack: 1, get: 0 });
+    f.restartDatabase();
+    assert.deepEqual(listOperations(f.db, 1)[0].metadata, op.metadata);
+    f.control.ackError = null;
+    const confirmed = await recoverOperation(f.db, 1, op.id, f.options);
+    assert.equal(confirmed.deliveryConfirmed, true); assert.equal(confirmed.taskState, 'succeeded');
+    assert.deepEqual(await readFile(mediaPath(op.id, false, f.directory)), saved);
+    assert.deepEqual(f.stats, { post: 1, ack: 2, get: 0 });
+  });
+}
+
+for (const [label, error] of [
+  ['503', { status: 503, code: 'commit_unavailable' }],
+  ['截断拒绝', { status: 410, code: 'delivery_expired', truncate: true }],
+  ['非 JSON 拒绝', { status: 410, code: 'delivery_expired', type: 'text/html' }],
+  ['不匹配 200', { status: 200, body: '{"state":"succeeded"}' }],
+  ['截断 200 JSON', { status: 200, body: '{"state":"succeeded"' }],
+]) test(`ACK ${label} 仍确认未知，保留完整本地文件、不猜 failed`, async t => {
+  const f = await fixture(t); f.control.ackError = error;
+  const op = await f.generate(); assert.equal(op.localState, 'saved'); assert.equal(op.deliveryConfirmed, false); assert.equal(op.taskState, 'delivering');
+  assert.match(op.error, /交付确认未确定/); assert.doesNotMatch(op.error, /已拒绝|private upstream/);
+  assert.equal((await readFile(mediaPath(op.id, false, f.directory))).length, op.metadata.bytes);
+  f.restartDatabase(); assert.deepEqual(listOperations(f.db, 1)[0].metadata, op.metadata);
+  assert.deepEqual(f.stats, { post: 1, ack: 1, get: 0 });
+});
+
+test('本地快时钟不阻断权威仍有效的 GET，实际到达 loopback 后保存同一产物', async t => {
+  const f = await fixture(t); f.control.truncate = true; await assert.rejects(f.generate());
+  const op = listOperations(f.db, 1)[0];
+  t.mock.method(Date, 'now', () => Date.parse(f.meta.delivery_expires_at) + 86400000);
+  const result = await recoverOperation(f.db, 1, op.id, f.options);
+  assert.equal(result.deliveryConfirmed, true); assert.deepEqual(f.stats, { post: 1, ack: 1, get: 1 });
+});
+
+for (const [status, code] of [[410, 'delivery_expired'], [410, 'output_unavailable'], [503, 'output_temporarily_unavailable']]) {
+  test(`快时钟恢复实际 GET 后按 ${status}/${code} 裁决，不重新生成`, async t => {
+    const f = await fixture(t); f.control.truncate = true; await assert.rejects(f.generate());
+    const op = listOperations(f.db, 1)[0]; f.control.getError = { status, code };
+    t.mock.method(Date, 'now', () => Date.parse(f.meta.delivery_expires_at) + 86400000);
+    await assert.rejects(recoverOperation(f.db, 1, op.id, f.options), error => error.upstreamStatus === status && error.code === code);
+    const after = listOperations(f.db, 1)[0];
+    assert.equal(after.taskState, code === 'delivery_expired' ? 'failed' : 'delivering');
+    assert.equal(after.deliveryConfirmed, false); assert.equal(after.taskId, op.taskId); assert.deepEqual(after.metadata, op.metadata);
+    assert.ok(after.error.includes(code)); assert.deepEqual(f.stats, { post: 1, ack: 0, get: 1 });
+  });
+}
+
+test('共享 Weave 配置校验在插入操作和请求前拒绝错误协议、类型、模型与地址', async t => {
+  const f = await fixture(t);
+  for (const change of [{ protocol: 'legacy' }, { type: 'llm' }, { type: 'image_edit' }, { model: 'other' }, { baseUrl: f.config.baseUrl.replace('/v1', '') }, { baseUrl: 'not-a-url/v1' }]) {
+    const original = { ...f.config }; Object.assign(f.config, change);
+    await assert.rejects(f.generate(), { status: 400 }); Object.assign(f.config, original);
+    assert.equal(f.db.prepare('SELECT count(*) AS n FROM generation_operations').get().n, 0);
+  }
+  assert.deepEqual(f.stats, { post: 0, ack: 0, get: 0 });
+});
+
+
+test('历史 legacy 标签及旧地址的已保存回执仍按原身份恢复，不套新建配置校验或改写配置', async t => {
+  const f = await fixture(t); f.control.ackLost = true; const op = await f.generate();
+  const oldAddress = f.config.baseUrl.replace('/v1', '');
+  const stored = f.db.prepare('SELECT config_json FROM generation_operations WHERE id=?').get(op.id);
+  const oldIdentity = { ...JSON.parse(stored.config_json), baseUrl: oldAddress };
+  // 合成升级前历史快照；新建请求必须通过 /v1 校验，旧回执不能因此失去原归属。
+  f.db.prepare('UPDATE api_configs SET base_url=? WHERE id=1').run(oldAddress);
+  f.db.exec("UPDATE api_protocols SET protocol='legacy' WHERE config_id=1");
+  f.db.prepare('UPDATE generation_operations SET config_json=? WHERE id=?').run(JSON.stringify(oldIdentity), op.id);
+  f.restartDatabase(); f.control.legacyPaths = true; f.control.ackLost = false;
+  const result = await recoverOperation(f.db, 1, op.id, f.options);
+  assert.equal(result.deliveryConfirmed, true); assert.deepEqual(result.metadata, op.metadata);
+  assert.equal(f.db.prepare('SELECT base_url FROM api_configs WHERE id=1').get().base_url, oldAddress);
+  assert.equal(f.db.prepare('SELECT protocol FROM api_protocols WHERE config_id=1').get().protocol, 'legacy');
+  assert.equal(f.db.prepare('SELECT config_json FROM generation_operations WHERE id=?').get(op.id).config_json, JSON.stringify(oldIdentity));
+  assert.deepEqual(f.stats, { post: 1, ack: 2, get: 0 });
 });

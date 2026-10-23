@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { request } from 'node:http';
 import { after, before, test } from 'node:test';
 import { createApp } from '../src/app.js';
 import { openDatabase } from '../src/database.js';
@@ -86,4 +87,39 @@ test('HEAD 没有响应正文，未实现的写入操作返回 405', async () =>
   const post = await fetch(baseUrl, { method: 'POST' });
   assert.equal(post.status, 405);
   assert.equal(post.headers.get('allow'), 'GET, HEAD');
+});
+
+test('只有设置测试允许超过6MiB的multipart；参考上传仍6MiB，设置测试总上限65MiB', async () => {
+  const upload = async (path, bytes) => {
+    const form = new FormData(); form.set('referenceImages', new Blob([Buffer.alloc(bytes)], { type: 'image/png' }), 'synthetic.png');
+    const encoded = new Request(baseUrl + path, { method: 'POST', body: form });
+    const body = Buffer.from(await encoded.arrayBuffer());
+    return new Promise((resolve, reject) => {
+      let responded = false;
+      const req = request(baseUrl + path, { method: 'POST', headers: { 'Content-Type': encoded.headers.get('content-type'), 'Content-Length': body.length } }, async res => {
+        responded = true; const chunks = []; for await (const chunk of res) chunks.push(chunk);
+        resolve(new Response(Buffer.concat(chunks), { status: res.statusCode }));
+      });
+      req.on('error', error => { if (!responded) reject(error); });
+      // 遇到早期413即停止本次上传，避免fetch在继续写大正文时只报告EPIPE。
+      let offset = 0;
+      const write = () => {
+        if (responded || req.destroyed) return;
+        if (offset === body.length) { req.end(); return; }
+        const next = Math.min(offset + 65536, body.length), chunk = body.subarray(offset, next); offset = next;
+        req.write(chunk); setImmediate(write);
+      };
+      write();
+    });
+  };
+  // 不存在的配置：通过表单限额才会到达404；绝不访问上游。
+  const accepted = await upload('/settings/api/999/check', 7 * 1024 * 1024);
+  assert.equal(accepted.status, 404);
+  const oversized = await upload('/settings/api/999/check', 65 * 1024 * 1024);
+  assert.equal(oversized.status, 413); assert.match((await oversized.json()).error, /提交内容过大/);
+  for (const path of ['/projects/1/characters/1/reference-image', '/projects/1/scenes/1/reference-image', '/projects/1/costumes/1/reference-image']) {
+    const response = await upload(path, 7 * 1024 * 1024);
+    assert.equal(response.status, 413, path); assert.match((await response.json()).error, /提交内容过大/);
+  }
+  assert.equal((await upload('/settings/api/999', 100)).status, 415);
 });
