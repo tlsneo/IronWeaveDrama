@@ -456,6 +456,7 @@ h2 { margin: 0; font-size: 23px; font-weight: 600; line-height: 1.5; }
 .generation-page main { width: 100%; box-sizing: border-box; }
 .generation-page nav { display: flex; flex-wrap: wrap; gap: 12px; }
 .generation-page form { display: flex; flex-direction: column; gap: 14px; margin: 18px 0; }
+.generation-page [hidden] { display: none !important; }
 .generation-page label { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .generation-page input:not([type="checkbox"]), .generation-page select, .generation-page textarea { max-width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid #9aa79e; border-radius: 6px; color: inherit; background: transparent; font: inherit; }
 .generation-page textarea { width: 100%; }

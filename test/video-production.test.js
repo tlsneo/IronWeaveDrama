@@ -1,4 +1,5 @@
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { openDatabase } from '../src/database.js';
 import { storyboardResources } from '../src/storyboards.js';
@@ -8,7 +9,7 @@ import { renderProduction } from '../src/render-generation.js';
 function fixture(t) {
   const db = openDatabase(':memory:'); t.after(() => db.close());
   db.exec("INSERT INTO projects VALUES(1,'合成测试','写实','16:9'),(2,'其他项目','水墨','1:1'); INSERT INTO seasons VALUES(1,1,'第一季',1); INSERT INTO episodes VALUES(1,1,'第一集',1); INSERT INTO episode_scripts VALUES(1,'原文','剧本','',1)");
-  const shots = [{ title: '第一镜', framing: 'wide shot', action: 'Static shot', dialogue: '', characterIds: [], sceneId: null }, { title: '第二镜', framing: 'close shot', action: 'The camera cuts', dialogue: '', characterIds: [], sceneId: null }];
+  const shots = [{ title: '第一镜', duration: 3, framing: 'wide shot', action: 'Static shot', dialogue: '', characterIds: [], sceneId: null }, { title: '第二镜', duration: 4.5, framing: 'close shot', action: 'The camera cuts', dialogue: '', characterIds: [], sceneId: null }];
   db.prepare('INSERT INTO episode_storyboards(episode_id,script_revision,revision,reviewed,resources_json,shots) VALUES(1,1,1,1,?,?)').run(JSON.stringify(storyboardResources(db, 1, 1)), JSON.stringify(shots));
   const sections = { subject_definitions: 'No external subjects.', summary: '[reference generation] A quiet empty room.', retention_analysis: 'No external reference.', detailed_description: 'Natural lighting. [Shot 1] A quiet room. [Shot 2] At 00:02.000, the camera cuts to the window.', overall_soundscape: 'Wind in the room.', non_diegetic_music: 'N/A' };
   const form = extra => new URLSearchParams({ revision: '0', name: '片段', shots: '[1,2]', pictures: '[]', subjects: '[]', profile: '{"size":"16x9","frames":124,"fps":24}', ...sections, ...extra });
@@ -71,6 +72,7 @@ test('可视化制作页选择连续镜头并显示素材缩略图，JSON仅作�
   const before = f.db.prepare('SELECT * FROM episode_storyboards').all();
   const html = renderProduction(f.db, 1, 1, new URLSearchParams({ start: '1', end: '2' }));
   assert.match(html, /name="start"/); assert.match(html, /镜头 1 → 2/);
+  assert.match(html, /估算 3 秒/); assert.match(html, /估算 4\.5 秒/); assert.match(html, /分镜估算 7\.5 秒/);
   assert.match(html, /src="\/projects\/1\/scenes\/1\/references\/1"/);
   for (const field of ['shots', 'pictures', 'subjects', 'sourceHash']) assert.match(html, new RegExp(`type="hidden" name="${field}"`));
   assert.doesNotMatch(html, /textarea[^>]*name="(?:shots|pictures|subjects)"|<pre>/);
@@ -91,4 +93,29 @@ test('新制作表单的来源快照冲突拒绝保存，不自动采纳变更�
   assert.deepEqual(readClip(f.db, 1, 1, saved.id), row);
   const html = renderProduction(f.db, 1, 1, new URLSearchParams({ clip: String(saved.id) }));
   assert.match(html, /片段依据已变化/); assert.match(html, /data-clip-generate[\s\S]*?<button disabled>生成视频/);
+});
+
+test('完全相同的片段保存保留版本和已采用视频，仍校验归属、版本及来源', t => {
+  const f = fixture(t), saved = saveClip(f.db, 1, 1, null, f.form());
+  const operation = '965375ee-5e5a-46bb-b187-23f779f3ddc1';
+  f.db.prepare("INSERT INTO generation_operations(id,project_id,kind,target_id,config_id,config_json,source_json,request_json,local_state,active,adopted) VALUES(?,1,'video',?,1,'{}','{}','{}','confirmed',0,1)").run(operation, saved.id);
+  f.db.prepare('UPDATE video_clips SET adopted_operation_id=? WHERE id=?').run(operation, saved.id);
+  const before = readClip(f.db, 1, 1, saved.id), history = f.db.prepare('SELECT * FROM generation_operations').all();
+  const hash = productionSourceDigest(clipSource(f.db, 1, 1, [1, 2]));
+  const result = saveClip(f.db, 1, 1, saved.id, f.form({ revision: '1', sourceHash: hash }));
+  assert.equal(result.revision, 1); assert.equal(result.id, saved.id);
+  assert.deepEqual(readClip(f.db, 1, 1, saved.id), before);
+  assert.deepEqual(f.db.prepare('SELECT * FROM generation_operations').all(), history);
+  assert.throws(() => saveClip(f.db, 1, 1, saved.id, f.form()), { status: 409 });
+  assert.throws(() => saveClip(f.db, 2, 1, saved.id, f.form({ revision: '1' })), { status: 404 });
+  assert.throws(() => saveClip(f.db, 1, 1, saved.id, f.form({ revision: '1', sourceHash: 'outdated' })), { status: 409 });
+  f.db.exec('UPDATE episode_storyboards SET revision=2 WHERE episode_id=1');
+  assert.throws(() => saveClip(f.db, 1, 1, saved.id, f.form({ revision: '1', sourceHash: hash })), { status: 409 });
+  const changed = saveClip(f.db, 1, 1, saved.id, f.form({ revision: '1', sourceHash: productionSourceDigest(clipSource(f.db, 1, 1, [1, 2])) }));
+  assert.equal(changed.revision, 2); assert.equal(readClip(f.db, 1, 1, saved.id).adopted_operation_id, null);
+});
+
+test('制作页隐藏控件不会被通用label布局显示', () => {
+  const css = readFileSync(new URL('../public/styles.css', import.meta.url), 'utf8');
+  assert.match(css, /\.generation-page \[hidden\]\s*\{\s*display:\s*none\s*!important;/);
 });

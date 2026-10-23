@@ -113,6 +113,9 @@ export function saveClip(db, projectId, episodeId, id, form) {
   if (!profile || Object.keys(profile).sort().join(',') !== 'fps,frames,size' || !/^[1-9]\d*x[1-9]\d*$/.test(profile.size) || !Number.isSafeInteger(profile.frames) || profile.frames < 1 || !Number.isSafeInteger(profile.fps) || profile.fps < 1) reject(400, '片段必须显式选择 size、frames、fps；不按秒数取整。');
   const values = [name, JSON.stringify(indices), JSON.stringify(source), JSON.stringify(sections), JSON.stringify(pictures), JSON.stringify(subjects), JSON.stringify(profile)];
   return inTransaction(db, () => {
+    if (previous && ['name', 'shots_json', 'source_json', 'sections_json', 'pictures_json', 'subjects_json', 'profile_json'].every((key, index) => previous[key] === values[index])) {
+      return { id, revision: previous.revision, redirect: `/projects/${projectId}/episodes/${episodeId}/media?clip=${id}` };
+    }
     if (id) {
       db.prepare('UPDATE video_clips SET name=?,shots_json=?,source_json=?,sections_json=?,pictures_json=?,subjects_json=?,profile_json=?,revision=revision+1,adopted_operation_id=NULL WHERE id=?').run(...values, id);
       db.prepare("UPDATE generation_operations SET adopted=0 WHERE project_id=? AND kind='video' AND target_id=?").run(projectId, id);
